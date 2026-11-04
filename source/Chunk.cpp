@@ -2918,8 +2918,9 @@ void Chunk::draw(float playerX, float playerY, float playerZ,
             if (((e * CONE_COS - d * CONE_SIN) >> 8) > BAND_R) continue; // fuera del cono
         }
 
-        // Comprobación de desbordamiento de polígonos por hardware en la GPU
+        // Comprobación y reseteo de desbordamiento de polígonos por hardware en la GPU
         if (GFX_CONTROL & GL_POLY_OVERFLOW) {
+            GFX_CONTROL |= GL_POLY_OVERFLOW; // Resetear la bandera en hardware (GBATEK)
             if (vertBudget) *vertBudget = 0;
             break;
         }
@@ -3350,6 +3351,41 @@ bool Chunk::saveToFile(const char* path) const {
         fclose(file);
         return written == rawSize;
     }
+}
+
+void Chunk::generateEmergencyChunk() {
+    // Generar un chunk básico de emergencia hecho de bloques de piedra/aire en la RAM
+    for (int xi = 0; xi < SIZE_X; xi++) {
+        for (int zi = 0; zi < SIZE_Z; zi++) {
+            blocks[xi][0][zi] = BlockType::BEDROCK;
+            for (int yi = 1; yi < 55; yi++) {
+                blocks[xi][yi][zi] = BlockType::STONE;
+            }
+            for (int yi = 55; yi < 62; yi++) {
+                blocks[xi][yi][zi] = BlockType::DIRT;
+            }
+            blocks[xi][62][zi] = BlockType::GRASS;
+            for (int yi = 63; yi < SIZE_Y; yi++) {
+                blocks[xi][yi][zi] = BlockType::AIR;
+            }
+            columnMinY[xi][zi] = 0;
+            columnMaxY[xi][zi] = 62;
+            occupancy[xi][zi][0] = 0xFFFFFFFF;
+            occupancy[xi][zi][1] = 0x3FFFFFFF;
+            occupancy[xi][zi][2] = 0;
+            occupancy[xi][zi][3] = 0;
+        }
+    }
+    memset(liquidMeta, 0, sizeof(liquidMeta));
+    syncRLEFromBlocks();
+    rebuildAllOccupancy();
+    if (s_dimension == 0) {
+        computeBiomeData();
+    }
+    loadStaging = false;
+    generationComplete = true;
+    beginFullFaceCacheRecalc();
+    markDisplayListDirty();
 }
 
 void Chunk::fillWithAir() {

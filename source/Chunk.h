@@ -48,6 +48,7 @@ public:
     bool saveToFileAsync(const char* path) const;
     // Mecanismo Fail-Safe y volcado seguro de chunks
     void fillWithAir();
+    void generateEmergencyChunk();
     bool loadFromRawBuffer(const u8* rawData, int rawSize);
 
     bool loadFromFile(const char* path);   // lee el archivo (etapa 1); el chunk queda "cargando" hasta que continueLoad() devuelva true

@@ -3,6 +3,7 @@
 #include "Chunk.h"
 #include "ChunkCompression.h"
 #include "Profiler.h"
+#include "DebugLogger.h"
 #include <stdio.h>
 
 IpcChunkExchange IpcChunkLoader::s_exchange __attribute__((aligned(4))) = {};
@@ -13,6 +14,7 @@ void IpcChunkLoader::init() {
     memset((void*)&s_exchange, 0, sizeof(s_exchange));
     s_exchange.status = IPC_STATUS_IDLE;
     s_exchange.slotIndex = -1;
+    s_exchange.frameCounter = 0;
     s_initialized = true;
 }
 
@@ -27,14 +29,17 @@ bool IpcChunkLoader::requestChunkLoad(int slotIndex, int chunkX, int chunkZ, con
     s_exchange.chunkX = chunkX;
     s_exchange.chunkZ = chunkZ;
     s_exchange.dataSize = 0;
+    s_exchange.frameCounter = 0;
     s_exchange.requestStartTick = Prof::now();
     strncpy(s_exchange.path, path, sizeof(s_exchange.path) - 1);
     s_exchange.path[sizeof(s_exchange.path) - 1] = '\0';
 
     s_exchange.status = IPC_STATUS_REQUESTED;
 
-    // El ARM9 envía la solicitud mediante irqSendFIFO() y continúa ejecutando la UI
+    // Mensajes obligatorios de depuración en tiempo real
+    DebugLogger::log("[DEBUG] Enviando señal FIFO al ARM7 para descompresión LZSS del Chunk Inicial...");
     irqSendFIFO(0x4C430000 | (slotIndex & 0xFFFF)); // 'LC' = Load Chunk
+    DebugLogger::log("[DEBUG] Esperando interrupción IPC del ARM7...");
     s_exchange.status = IPC_STATUS_READING;
 
     return true;
@@ -57,14 +62,15 @@ void IpcChunkLoader::abortRequest(ChunkManager* manager) {
     if (manager && slot >= 0) {
         Chunk* c = manager->getChunkSlot(slot);
         if (c) {
-            // Fail-Safe: rellenar temporalmente con bloques de Aire (ID: 0) en la RAM
-            c->fillWithAir();
+            // Generar chunk de emergencia hecho de bloques de piedra/aire en la RAM
+            c->generateEmergencyChunk();
             manager->clearAwaitingLoad(slot);
         }
     }
     REG_IPC_FIFO_CR |= IPC_FIFO_SEND_CLEAR;
     s_exchange.status = IPC_STATUS_IDLE;
     s_exchange.slotIndex = -1;
+    s_exchange.frameCounter = 0;
 }
 
 void IpcChunkLoader::update(ChunkManager* manager) {
@@ -72,15 +78,26 @@ void IpcChunkLoader::update(ChunkManager* manager) {
     if (!manager) return;
     if (s_exchange.status == IPC_STATUS_IDLE) return;
 
-    // 1. Temporizador de seguridad (Timeout) en la carga de archivos: 3000ms
-    u32 elapsed = Prof::now() - s_exchange.requestStartTick;
-    if (elapsed >= TIMEOUT_TICKS) {
+    s_exchange.frameCounter++;
+
+    // 1. Mecanismo de Escape a 1 FPS (límite de 60 frames sin respuesta)
+    if (s_exchange.frameCounter >= MAX_WAIT_FRAMES) {
+        DebugLogger::log("[DEBUG] ARM7 demoro mas de 60 frames. Escape forzado activado: generando chunk de emergencia (piedra/aire)...");
         s_exchange.status = IPC_STATUS_TIMEOUT;
         abortRequest(manager);
         return;
     }
 
-    // 2. Máquina de estados compartida para streaming sin bucle ciego
+    // 2. Temporizador de seguridad (Timeout) en tiempo real: 3000ms
+    u32 elapsed = Prof::now() - s_exchange.requestStartTick;
+    if (elapsed >= TIMEOUT_TICKS) {
+        DebugLogger::log("[DEBUG] Timeout de 3000ms alcanzado. Abortando solicitud asincrona...");
+        s_exchange.status = IPC_STATUS_TIMEOUT;
+        abortRequest(manager);
+        return;
+    }
+
+    // 3. Máquina de estados compartida para streaming sin bucle ciego
     if (s_exchange.status == IPC_STATUS_REQUESTED || s_exchange.status == IPC_STATUS_READING) {
         FILE* f = fopen(s_exchange.path, "rb");
         if (!f) {
@@ -89,6 +106,7 @@ void IpcChunkLoader::update(ChunkManager* manager) {
             int slot = s_exchange.slotIndex;
             s_exchange.status = IPC_STATUS_IDLE;
             s_exchange.slotIndex = -1;
+            s_exchange.frameCounter = 0;
             manager->clearAwaitingLoad(slot);
             return;
         }
@@ -114,13 +132,14 @@ void IpcChunkLoader::update(ChunkManager* manager) {
         }
 
         s_exchange.dataSize = (u32)readBytes;
+        DebugLogger::log("[DEBUG] Datos de bloques recibidos en RAM. Tamaño: %d bytes.", s_exchange.dataSize);
 
         // El ARM7 notifica mediante interrupción en REG_IPC_FIFO_CR que los bloques están listos
         REG_IPC_FIFO_CR |= IPC_FIFO_RECV_IRQ;
         s_exchange.status = IPC_STATUS_READY;
     }
 
-    // 3. Volcado y descompresión de datos listos en la RAM
+    // 4. Volcado y descompresión de datos listos en la RAM
     if (s_exchange.status == IPC_STATUS_READY) {
         int slot = s_exchange.slotIndex;
         Chunk* c = manager->getChunkSlot(slot);
@@ -136,12 +155,14 @@ void IpcChunkLoader::update(ChunkManager* manager) {
             }
 
             if (!ok) {
-                // Error de lectura/descompresión: Fail-safe rellena con Aire (ID: 0)
-                c->fillWithAir();
+                // Error de lectura/descompresión: Fail-safe genera chunk de emergencia
+                DebugLogger::log("[DEBUG] Fallo de descompresion. Generando chunk de emergencia...");
+                c->generateEmergencyChunk();
             }
             manager->clearAwaitingLoad(slot);
         }
         s_exchange.status = IPC_STATUS_IDLE;
         s_exchange.slotIndex = -1;
+        s_exchange.frameCounter = 0;
     }
 }

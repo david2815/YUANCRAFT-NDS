@@ -37,3 +37,4 @@ text = text.replace(old_public, new_public)
 with open("source/ChunkManager.h", "w", encoding="utf-8") as f:
     f.write(text)
 print("Moved getChunkSlot and clearAwaitingLoad to public section of ChunkManager.h")
+

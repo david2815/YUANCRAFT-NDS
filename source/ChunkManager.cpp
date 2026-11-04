@@ -617,16 +617,17 @@ void ChunkManager::drawAll(float playerX, float playerY, float playerZ, float lo
         drawDistSq[b + 1] = dist;
     }
 
+    // Resetear en hardware la bandera de overflow para garantizar que el terreno comience limpio
+    GFX_CONTROL |= GL_POLY_OVERFLOW;
+
     // Límite estricto de polígonos por frame: máximo 2000 polígonos para evitar saturación de la GPU a 1 FPS
     int polyBudget = (Options::get().renderQuality == 2) ? 1400 : ((Options::get().renderQuality == 1) ? 1700 : 2000);
-    // Cada quad aporta 2 polígonos y 4 vértices (máximo 4000 vértices para el terreno)
     int vertBudget = polyBudget * 2;
     int rebuildBandBudget = Governor::skipHeavy() ? 0 : 64;
     Chunk::beginRebuildFrame();
 
     for (int k = 0; k < drawCount; k++) {
-        if (vertBudget <= 0 || (GFX_CONTROL & GL_POLY_OVERFLOW)) {
-            // Descarte inmediato si se satura el presupuesto de 2000 polígonos o la GPU señala overflow
+        if (vertBudget <= 0) {
             break;
         }
         int i = drawOrder[k];

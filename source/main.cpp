@@ -1,3 +1,4 @@
+#include "DebugLogger.h"
 #include "HwMath.h"
 #include "Hardware.h"
 
@@ -524,10 +525,20 @@ int main(void) {
     bool diagInitialized = false;
     bool selectedSlotChangedByTouch = false;
 
+    // Registro y activación estricta de interrupciones de hardware
+    irqInit();
+    irqEnable(IRQ_VBLANK);
+
+    // Inyección obligatoria de mensajes de depuración en arranque
+    DebugLogger::init();
+    DebugLogger::log("[DEBUG] Inicializando sistema de archivos FAT...");
+
     if (!fatInitDefault()) {
         iprintf("ERROR: libfat init failed\n");
+        DebugLogger::log("[DEBUG] ERROR: Fallo al inicializar libfat.");
     } else {
         iprintf("libfat initialized\n");
+        DebugLogger::log("[DEBUG] Sistema de archivos FAT inicializado correctamente.");
     }
     Prof::init();
     WorldSave::ensureDirectoryStructure();

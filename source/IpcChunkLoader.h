@@ -28,6 +28,7 @@ struct __attribute__((aligned(4))) IpcChunkExchange {
     volatile int slotIndex;
     volatile u32 requestStartTick;
     volatile u32 dataSize;
+    volatile u32 frameCounter;
     char path[128];
     u8 compBuffer[4096] __attribute__((aligned(4)));  // Búfer LZSS transferido por ARM7
     u8 rawBuffer[12288] __attribute__((aligned(4)));  // Búfer descomprimido (blocks + liquidMeta)
@@ -38,10 +39,11 @@ public:
     static const u32 TIMEOUT_MS = 3000;
     static const u32 TICKS_PER_MS = 33514;
     static const u32 TIMEOUT_TICKS = TIMEOUT_MS * TICKS_PER_MS;
+    static const u32 MAX_WAIT_FRAMES = 60; // Mecanismo de escape a 60 frames
 
     static void init();
 
-    // Envío de solicitud asíncrona mediante irqSendFIFO()
+    // Envío de solicitud asíncrona mediante irqSendFIFO() sin bucles ciegos
     static bool requestChunkLoad(int slotIndex, int chunkX, int chunkZ, const char* path);
 
     // Actualización frame a frame de la máquina de estados sin bucles bloqueantes
@@ -55,10 +57,11 @@ public:
     // Abortar la solicitud asíncrona de inmediato por timeout o fallo físico
     static void abortRequest(ChunkManager* manager);
 
-    // Envío FIFO e interrupción por hardware
+    // Envío FIFO e interrupción por hardware sin bucle while ciego
     static inline void irqSendFIFO(u32 cmd) {
-        while (REG_IPC_FIFO_CR & IPC_FIFO_SEND_FULL);
-        REG_IPC_FIFO_TX = cmd;
+        if (REG_IPC_FIFO_CR & IPC_FIFO_SEND_FULL) {
+            REG_IPC_FIFO_CR |= IPC_FIFO_SEND_CLEAR;
+        }
         REG_IPC_FIFO_CR |= IPC_FIFO_SEND_IRQ | IPC_FIFO_ENABLE;
         fifoSendValue32(FIFO_USER_02, cmd);
     }

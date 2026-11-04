@@ -444,3 +444,4 @@ bool Chunk::loadFromFile(const char* path) {"""
 
 if __name__ == "__main__":
     apply_ipc_streaming()
+

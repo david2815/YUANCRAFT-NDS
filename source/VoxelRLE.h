@@ -22,6 +22,15 @@ static inline bool isVramPointer(const void* ptr) {
     return (addr >= 0x06000000 && addr < 0x07000000);
 }
 
+// Validación de memoria segura para perfiles DS (4 MB) y DSi (16 MB)
+static inline bool isValidMainRamPointer(const void* ptr, bool isDSi) {
+    if (!ptr) return false;
+    uintptr_t addr = (uintptr_t)ptr;
+    if (isVramPointer(ptr)) return false;
+    uintptr_t maxAddr = isDSi ? 0x03000000 : 0x02400000;
+    return (addr >= 0x02000000 && addr < maxAddr);
+}
+
 struct __attribute__((aligned(2))) RLERun {
     BlockType type; // 1 byte: tipo de bloque
     u8 length;      // 1 byte: longitud del tramo (1..128)
