@@ -8,3 +8,4 @@ build/
 tools/alphakey
 # graphify local cache
 graphify-out/cache/
+graphify-out/.rebuild.lock
