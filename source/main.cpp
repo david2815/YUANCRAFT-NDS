@@ -1293,6 +1293,10 @@ Weather::load();
         }
 
         if (state == STATE_LOADING) {
+            // Estabilidad del bucle de UI durante la transición: mantener activa la tasa de refresco y registros GPU
+            scanKeys();
+            swiWaitForVBlank();
+
             Governor::setEnabled(false);       // cargando: lo que importa es terminar
             Chunk::setBudgetPercent(100);
             chunkManager->update(player->x, player->z);

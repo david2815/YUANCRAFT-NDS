@@ -156,27 +156,27 @@
     "semantic_hash": "ecb86b867a5a7e15403ef4f577ff7720"
   },
   "source/Chunk.cpp": {
-    "mtime": 1793761246.7582195,
-    "seen": 1793761530.6281388,
-    "ast_hash": "7ba6d402813778f521ae2eb15b1c37ac",
+    "mtime": 1793762267.1555417,
+    "seen": 1793762439.8652914,
+    "ast_hash": "305d508a34d1ed9856a4cd3961d6bd8b",
     "semantic_hash": ""
   },
   "source/Chunk.h": {
-    "mtime": 1793759702.1707244,
-    "seen": 1793759812.9589183,
-    "ast_hash": "f1a4f05e3e3d0780aecfc860a9bc2cae",
+    "mtime": 1793762267.1515272,
+    "seen": 1793762439.8652914,
+    "ast_hash": "623103e9e6174af843d1ca4b534a6295",
     "semantic_hash": ""
   },
   "source/ChunkManager.cpp": {
-    "mtime": 1793761246.753715,
-    "seen": 1793761530.6291385,
-    "ast_hash": "abf0650ddabf0ebd212b9fb7ce7bf9e0",
+    "mtime": 1793762267.157536,
+    "seen": 1793762439.8656764,
+    "ast_hash": "067390fc8ba7319dfe203381d14088b0",
     "semantic_hash": ""
   },
   "source/ChunkManager.h": {
-    "mtime": 1793753158.7672775,
-    "seen": 1793753588.1377823,
-    "ast_hash": "76bf987eb40fec2c4135a77b0257a940",
+    "mtime": 1793762314.091587,
+    "seen": 1793762439.8656764,
+    "ast_hash": "2776262f04320cf6317b285e689fbd2d",
     "semantic_hash": ""
   },
   "source/Climate.h": {
@@ -1170,9 +1170,9 @@
     "semantic_hash": ""
   },
   "source/main.cpp": {
-    "mtime": 1793761246.7617252,
-    "seen": 1793761530.676779,
-    "ast_hash": "ec586e92f0b2473cce4eedacc06cbd1a",
+    "mtime": 1793762267.1610396,
+    "seen": 1793762439.9194229,
+    "ast_hash": "f4eb1e9088ba10252f5c160c5cca94e2",
     "semantic_hash": ""
   },
   "tools/alphakey.c": {
@@ -1614,9 +1614,9 @@
     "semantic_hash": ""
   },
   "source/AsyncSaveManager.cpp": {
-    "mtime": 1793759702.169263,
-    "seen": 1793759812.9544137,
-    "ast_hash": "03cf9634f5ccbdaaa037e7f86d7bfeb1",
+    "mtime": 1793762267.1620393,
+    "seen": 1793762439.8602855,
+    "ast_hash": "45d5b90fd4449b614cc43842255287aa",
     "semantic_hash": ""
   },
   "source/AsyncSaveManager.h": {
@@ -1788,39 +1788,75 @@
     "semantic_hash": ""
   },
   "scratch/apply_polygon_and_world_fixes.py": {
-    "mtime": 1793761232.526152,
-    "seen": 1793761530.608533,
+    "mtime": 1793761603.7498128,
+    "seen": 1793762439.845274,
     "ast_hash": "6fde82a28efbaa9378d5492252235c15",
     "semantic_hash": ""
   },
   "scratch/fix_subpath.py": {
-    "mtime": 1793761306.6342404,
-    "seen": 1793761530.6105323,
-    "ast_hash": "257e0b608f17d1719e5d5592e03fd5a6",
+    "mtime": 1793761601.2275498,
+    "seen": 1793762439.8467827,
+    "ast_hash": "4dfef8a1252a826b1884f8194e184384",
     "semantic_hash": ""
   },
   "scratch/patch_hand_map.py": {
-    "mtime": 1793761357.1176372,
-    "seen": 1793761530.6112883,
-    "ast_hash": "a335d3771ceb7543d02355aab204def2",
+    "mtime": 1793761601.2773352,
+    "seen": 1793762439.8477771,
+    "ast_hash": "4209d3a02cbb2844dc5b886705af5847",
     "semantic_hash": ""
   },
   "scratch/update_fast_div.py": {
-    "mtime": 1793761452.6896198,
-    "seen": 1793761530.6155393,
-    "ast_hash": "c4758f38fd6ceff31214fe1cb0fe3a6a",
+    "mtime": 1793761601.3359723,
+    "seen": 1793762439.8522801,
+    "ast_hash": "85d9e9068aa5840463cb2e32506657df",
     "semantic_hash": ""
   },
   "scratch/verify_polygon_and_world_fixes.py": {
-    "mtime": 1793761338.5943255,
-    "seen": 1793761530.618048,
-    "ast_hash": "bf896d9476effb529ff6af0abf8fd1c8",
+    "mtime": 1793761601.389284,
+    "seen": 1793762439.854784,
+    "ast_hash": "58b229ef30bf7e552c149b0cd24d8b18",
     "semantic_hash": ""
   },
   "scratch/verify_world_select_simulation.py": {
-    "mtime": 1793761474.7327752,
-    "seen": 1793761530.6190434,
+    "mtime": 1793761603.8868687,
+    "seen": 1793762439.8572917,
     "ast_hash": "8060ca93d8a53e243514ce291e554d49",
+    "semantic_hash": ""
+  },
+  "scratch/apply_ipc_chunk_streaming.py": {
+    "mtime": 1793762261.566787,
+    "seen": 1793762439.845274,
+    "ast_hash": "e3aae718b9309f8be778c72730f5bb36",
+    "semantic_hash": ""
+  },
+  "scratch/fix_chunkmanager_h.py": {
+    "mtime": 1793762307.9390695,
+    "seen": 1793762439.8467827,
+    "ast_hash": "a7a89a59b5ed69d51e4719c96ee1188e",
+    "semantic_hash": ""
+  },
+  "scratch/verify_ipc_streaming_simulation.py": {
+    "mtime": 1793762389.6991627,
+    "seen": 1793762439.854784,
+    "ast_hash": "a332cafdc74e801d0fdd1f41cde4ac6d",
+    "semantic_hash": ""
+  },
+  "scratch/verify_ipc_streaming_structural.py": {
+    "mtime": 1793762354.355557,
+    "seen": 1793762439.854784,
+    "ast_hash": "64ff25d65994ce0ec912f67f56c4a616",
+    "semantic_hash": ""
+  },
+  "source/IpcChunkLoader.cpp": {
+    "mtime": 1793762267.1509216,
+    "seen": 1793762439.881764,
+    "ast_hash": "0a608bfba3aee01f1628439a4c059134",
+    "semantic_hash": ""
+  },
+  "source/IpcChunkLoader.h": {
+    "mtime": 1793762267.1499243,
+    "seen": 1793762439.881764,
+    "ast_hash": "ba12f55ee13fe7c989fc46e59bbfe09a",
     "semantic_hash": ""
   }
 }

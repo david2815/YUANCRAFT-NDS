@@ -128,6 +128,8 @@ void AsyncSaveManager::processQueue() {
 void AsyncSaveManager::flushAll() {
     if (!s_initialized) return;
     while (s_pendingCount > 0) {
+        scanKeys();
+        swiWaitForVBlank();
         processQueue();
     }
 }

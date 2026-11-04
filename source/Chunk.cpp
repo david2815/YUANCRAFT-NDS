@@ -3352,6 +3352,68 @@ bool Chunk::saveToFile(const char* path) const {
     }
 }
 
+void Chunk::fillWithAir() {
+    for (int xi = 0; xi < SIZE_X; xi++) {
+        for (int yi = 0; yi < SIZE_Y; yi++) {
+            for (int zi = 0; zi < SIZE_Z; zi++) {
+                blocks[xi][yi][zi] = BlockType::AIR;
+            }
+        }
+        for (int zi = 0; zi < SIZE_Z; zi++) {
+            rleCols[xi][zi].initEmpty();
+            columnMinY[xi][zi] = SIZE_Y;
+            columnMaxY[xi][zi] = -1;
+            occupancy[xi][zi][0] = 0;
+            occupancy[xi][zi][1] = 0;
+            occupancy[xi][zi][2] = 0;
+            occupancy[xi][zi][3] = 0;
+        }
+    }
+    memset(liquidMeta, 0, sizeof(liquidMeta));
+    syncRLEFromBlocks();
+    rebuildAllOccupancy();
+    if (s_dimension == 0) {
+        computeBiomeData();
+    }
+    loadStaging = false;
+    generationComplete = true;
+    beginFullFaceCacheRecalc();
+    markDisplayListDirty();
+}
+
+bool Chunk::loadFromRawBuffer(const u8* rawData, int rawSize) {
+    if (!rawData || rawSize < (int)(sizeof(blocks) + sizeof(liquidMeta))) {
+        fillWithAir();
+        return false;
+    }
+    memcpy(blocks, rawData, sizeof(blocks));
+    memcpy(liquidMeta, rawData + sizeof(blocks), sizeof(liquidMeta));
+
+    syncRLEFromBlocks();
+
+    // Comprobación de integridad: si y=0 es todo aire se descarta
+    bool any = false;
+    for (int x = 0; x < SIZE_X && !any; x++) {
+        for (int z = 0; z < SIZE_Z; z++) {
+            if (blocks[x][0][z] != BlockType::AIR) { any = true; break; }
+        }
+    }
+    if (!any) {
+        fillWithAir();
+        return false;
+    }
+
+    rebuildAllOccupancy();
+    if (s_dimension == 0) {
+        computeBiomeData();
+    }
+    loadStaging = false;
+    generationComplete = true;
+    beginFullFaceCacheRecalc();
+    markDisplayListDirty();
+    return true;
+}
+
 bool Chunk::loadFromFile(const char* path) {
     FILE* file;
     { PROFSTEP("load: open"); file = fopen(path, "rb"); }

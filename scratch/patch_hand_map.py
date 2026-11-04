@@ -14,3 +14,4 @@ c = c.replace(target2, replacement2)
 with open("source/HandAnimations.cpp", "w", encoding="utf-8") as f:
     f.write(c)
 print("Replaced divisions in HandAnimations.cpp successfully")
+

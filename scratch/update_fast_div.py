@@ -55,3 +55,4 @@ ha = ha.replace(ha_old2, ha_new2)
 with open("source/HandAnimations.cpp", "w", encoding="utf-8") as f:
     f.write(ha)
 print("Updated HandAnimations.cpp")
+

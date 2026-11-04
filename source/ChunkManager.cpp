@@ -1,3 +1,4 @@
+#include "IpcChunkLoader.h"
 #include "AsyncSaveManager.h"
 #include "Liquid.h"
 #include "Redstone.h"
@@ -261,19 +262,18 @@ void ChunkManager::update(float playerX, float playerZ, float lookDirX, float lo
         }
     }
 
-    if (pendingLoadCount > 0) {
+    // 1. Procesar el protocolo IPC seguro de streaming de chunks sin bucles ciegos
+    IpcChunkLoader::update(this);
+
+    // 2. Si el canal IPC está disponible y hay cargas pendientes, solicitar la siguiente de forma asíncrona
+    if (!IpcChunkLoader::isBusy() && pendingLoadCount > 0) {
         pendingLoadCount--;
         int i = pendingLoadSlots[pendingLoadCount];
 
         if (slotUsed[i]) {
             char filename[96];
             Chunk::getSaveFilenameFor(chunkPosX[i], chunkPosZ[i], seed, filename);
-            if (chunks[i]->loadFromFile(filename)) {
-                // Carga instantanea: descompresion y volcado directo completados
-                loadingBiome[i] = false;
-                awaitingLoad[i] = false;
-                chunks[i]->beginFullFaceCacheRecalc();
-            } else {
+            if (!IpcChunkLoader::requestChunkLoad(i, chunkPosX[i], chunkPosZ[i], filename)) {
                 awaitingLoad[i] = false;
             }
         }

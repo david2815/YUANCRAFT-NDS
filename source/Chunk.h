@@ -46,6 +46,10 @@ public:
 
     bool saveToFile(const char* path) const;
     bool saveToFileAsync(const char* path) const;
+    // Mecanismo Fail-Safe y volcado seguro de chunks
+    void fillWithAir();
+    bool loadFromRawBuffer(const u8* rawData, int rawSize);
+
     bool loadFromFile(const char* path);   // lee el archivo (etapa 1); el chunk queda "cargando" hasta que continueLoad() devuelva true
     bool continueLoad();                   // etapa 2, repartida en cuadros: clima, bioma y colores, ocupacion. true = el chunk quedo completo
 

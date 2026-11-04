@@ -30,6 +30,16 @@ public:
     bool isGenerationComplete() const;
 
     Chunk* getCenterChunk() const { return chunks[centerIndex]; }
+    Chunk* getChunkSlot(int slot) {
+        if (slot >= 0 && slot < maxChunks && slotUsed[slot]) return chunks[slot];
+        return nullptr;
+    }
+    void clearAwaitingLoad(int slot) {
+        if (slot >= 0 && slot < maxChunks) {
+            awaitingLoad[slot] = false;
+            loadingBiome[slot] = false;
+        }
+    }
     unsigned int getSeed() const { return seed; }
     int countModifiedChunks() const;
     int saveModifiedChunks() const;
