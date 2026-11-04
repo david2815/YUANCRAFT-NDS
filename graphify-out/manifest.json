@@ -156,15 +156,15 @@
     "semantic_hash": "ecb86b867a5a7e15403ef4f577ff7720"
   },
   "source/Chunk.cpp": {
-    "mtime": 1793751384.7857654,
-    "seen": 1793751620.8022344,
-    "ast_hash": "d91a28dae9c4c45ff60e4bcf89e2e2c3",
+    "mtime": 1793759702.1770883,
+    "seen": 1793759812.9589183,
+    "ast_hash": "d2765237625b5ef7a90d080c4e2fff71",
     "semantic_hash": ""
   },
   "source/Chunk.h": {
-    "mtime": 1793751384.7822628,
-    "seen": 1793751620.8022344,
-    "ast_hash": "0995028dff652e48aa4656fedc775ce1",
+    "mtime": 1793759702.1707244,
+    "seen": 1793759812.9589183,
+    "ast_hash": "f1a4f05e3e3d0780aecfc860a9bc2cae",
     "semantic_hash": ""
   },
   "source/ChunkManager.cpp": {
@@ -864,9 +864,9 @@
     "semantic_hash": "3e9d43b09bf5cf852cde32560b0a66b8"
   },
   "source/Renderer.cpp": {
-    "mtime": 1793751384.7882757,
-    "seen": 1793751620.8348098,
-    "ast_hash": "241064e7e8b8b59c571a1f2a0d729692",
+    "mtime": 1793759702.178099,
+    "seen": 1793759812.9941094,
+    "ast_hash": "48285f26efd3bdb18279d721bc2ca195",
     "semantic_hash": ""
   },
   "source/Renderer.h": {
@@ -1170,9 +1170,9 @@
     "semantic_hash": "9d533ac64561cd883648e29b814c9b0f"
   },
   "source/main.cpp": {
-    "mtime": 1793756952.8043404,
-    "seen": 1793757080.7537155,
-    "ast_hash": "4b877f7e43f9d67185bf14e7af0a1e4e",
+    "mtime": 1793759702.1811318,
+    "seen": 1793759813.0087528,
+    "ast_hash": "4045310c6b1e60aee710054b884286f7",
     "semantic_hash": ""
   },
   "tools/alphakey.c": {
@@ -1500,21 +1500,21 @@
     "semantic_hash": "4b5e96997207352e8516f3301678c5ab"
   },
   "source/Hardware.h": {
-    "mtime": 1793754499.4721394,
-    "seen": 1793755269.2135592,
-    "ast_hash": "263053568d851f20e7a6ff43120fb005",
+    "mtime": 1793759702.1770883,
+    "seen": 1793759812.9694266,
+    "ast_hash": "4ca8d4dbc267da50b9ec5a10c57ffa3d",
     "semantic_hash": ""
   },
   "source/ChunkCompression.h": {
-    "mtime": 1793745619.556574,
-    "seen": 1793746707.0046196,
-    "ast_hash": "d997aa88c33c8f9473912a24ae3259ce",
+    "mtime": 1793759702.1702566,
+    "seen": 1793759812.9589183,
+    "ast_hash": "c8aba8f98d48306223c83b36e726c93e",
     "semantic_hash": ""
   },
   "source/VoxelRLE.h": {
-    "mtime": 1793751384.7812676,
-    "seen": 1793751620.8463166,
-    "ast_hash": "13f2898df2a3d6cb5d7c6a0a523f8536",
+    "mtime": 1793759702.1677694,
+    "seen": 1793759813.0067327,
+    "ast_hash": "11309deb50243f2100bbddf5ecc6d16c",
     "semantic_hash": ""
   },
   "scratch/fix_chunk.py": {
@@ -1614,15 +1614,15 @@
     "semantic_hash": ""
   },
   "source/AsyncSaveManager.cpp": {
-    "mtime": 1793756126.2035716,
-    "seen": 1793756262.5604498,
-    "ast_hash": "b62677a90aaf7b80a9371f477bf2c9b7",
+    "mtime": 1793759702.169263,
+    "seen": 1793759812.9544137,
+    "ast_hash": "03cf9634f5ccbdaaa037e7f86d7bfeb1",
     "semantic_hash": ""
   },
   "source/AsyncSaveManager.h": {
-    "mtime": 1793756102.9403813,
-    "seen": 1793756262.5604498,
-    "ast_hash": "8df9e272400ee914f3137e0dbcc974a2",
+    "mtime": 1793759702.1684802,
+    "seen": 1793759812.9544137,
+    "ast_hash": "7485f1f15ef2d921f2a2446012003a01",
     "semantic_hash": ""
   },
   "scratch/apply_hardware_optimizations.py": {
@@ -1767,6 +1767,24 @@
     "mtime": 1793757101.9567318,
     "seen": 1793758685.4604037,
     "ast_hash": "4ed58ff42546b7d343ccb2ec4f31a194",
+    "semantic_hash": ""
+  },
+  "scratch/apply_vram_and_gpu_sanitization.py": {
+    "mtime": 1793759685.5169036,
+    "seen": 1793759812.9400349,
+    "ast_hash": "0abf14abf0a1091b7d0709906d733756",
+    "semantic_hash": ""
+  },
+  "scratch/verify_vram_and_gpu_sanitization.py": {
+    "mtime": 1793759753.2783139,
+    "seen": 1793759812.9508975,
+    "ast_hash": "d5e6708e02f51a8ff616d2df79dcabca",
+    "semantic_hash": ""
+  },
+  "scratch/verify_vram_and_gpu_simulation.py": {
+    "mtime": 1793759783.3801737,
+    "seen": 1793759812.9508975,
+    "ast_hash": "de5062543759f605e628401b5229b2a2",
     "semantic_hash": ""
   }
 }

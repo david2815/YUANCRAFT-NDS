@@ -19,11 +19,13 @@ public:
     static const int QUEUE_CAPACITY = 8;
     static const int MAX_BUFFER_SIZE = 4096; // Búfer continuo para datos comprimidos LZSS
 
-    struct SaveTask {
+    // Estructura estrictamente alineada a 32 bits para DMA y coprocesador
+    struct __attribute__((aligned(4))) SaveTask {
         char path[96];
         int dataSize;
-        u8 data[MAX_BUFFER_SIZE];
+        u8 data[MAX_BUFFER_SIZE] __attribute__((aligned(4)));
         volatile bool inUse;
+        u8 _pad[3];
     };
 
     static void init();
@@ -43,7 +45,7 @@ public:
     static void resetSaveSession();
 
 private:
-    static SaveTask s_queue[QUEUE_CAPACITY];
+    static SaveTask s_queue[QUEUE_CAPACITY] __attribute__((aligned(4)));
     static int s_head;
     static int s_tail;
     static int s_pendingCount;

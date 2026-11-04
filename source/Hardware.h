@@ -24,6 +24,27 @@ private:
     static inline int& cpuFreqRef() { static int f = 67; return f; }
     static inline bool& initedRef() { static bool i = false; return i; }
 
+    // Conmutación segura de frecuencia ejecutada en ITCM conforme a las especificaciones GBATEK
+    ITCM_CODE static void applyClockSafeTWL() {
+        // Preservar configuración previa de EXMEMCNT (waitstates de bus de VRAM, ROM y SD)
+        u16 oldExmem = REG_EXMEMCNT;
+
+        // Conmutar CPU ARM9 a alta velocidad (134.06 MHz)
+        setCpuClock(true);
+
+        // Restaurar de forma estricta los waitstates de bus para que VRAM y SD no colapsen
+        REG_EXMEMCNT = oldExmem;
+
+        // Esperar ciclos de reloj en ITCM para que el bus y PLL se estabilicen
+        for (volatile int i = 0; i < 128; i++) {
+            __asm__ volatile("nop");
+        }
+
+        // Sincronizar memorias intermedias y cachés
+        DC_FlushAll();
+        IC_InvalidateAll();
+    }
+
 public:
     static inline void initHardwareProfile() {
         if (initedRef()) return;
@@ -32,11 +53,10 @@ public:
         g_isDSi = isDSiMode();
 
         if (g_isDSi) {
-            // Activar reloj a 133.12 MHz (TWL Mode) en CPU ARM9
-            setCpuClock(true);
+            // Conmutación segura de reloj preservando waitstates de bus y VRAM
+            applyClockSafeTWL();
 
             // Verificación segura leyendo el registro SCFG_CLK (bit 0 = 133 MHz)
-            // Solo se lee en DSi (en DS original causaría bus error de memoria)
             u16 clk = REG_SCFG_CLK;
             if ((clk & 1) != 0 || g_isDSi) {
                 ocFlag() = true;

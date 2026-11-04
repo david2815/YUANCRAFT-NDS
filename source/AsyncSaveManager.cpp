@@ -3,7 +3,7 @@
 #include <nds/fifocommon.h>
 #include <nds/fifomessages.h>
 
-AsyncSaveManager::SaveTask AsyncSaveManager::s_queue[AsyncSaveManager::QUEUE_CAPACITY] = {};
+AsyncSaveManager::SaveTask AsyncSaveManager::s_queue[AsyncSaveManager::QUEUE_CAPACITY] __attribute__((aligned(4))) = {};
 int AsyncSaveManager::s_head = 0;
 int AsyncSaveManager::s_tail = 0;
 int AsyncSaveManager::s_pendingCount = 0;
@@ -36,6 +36,10 @@ bool AsyncSaveManager::enqueueSave(const char* path, const u8* compData, int com
     if (!s_initialized) init();
     if (!path || !compData || compSize <= 0) return false;
     if (compSize > MAX_BUFFER_SIZE) return false;
+
+    // Protección absoluta de VRAM: rechazar punteros de bancos de video 3D (0x06000000..0x06FFFFFF)
+    uintptr_t srcAddr = (uintptr_t)compData;
+    if (srcAddr >= 0x06000000 && srcAddr < 0x07000000) return false;
 
     // Si la cola está llena, procesar una tarea antes de encolar la siguiente
     if (s_pendingCount >= QUEUE_CAPACITY) {

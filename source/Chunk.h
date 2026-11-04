@@ -189,11 +189,11 @@ private:
     static constexpr int DL_REBUILD_BANDS_PER_CALL = 2;
 
     u32 canaryBeforeBlocks = 0xDEAD0001;
-    BlockType blocks[WorldConfig::SIZE_X][WorldConfig::SIZE_Y][WorldConfig::SIZE_Z];
-    VoxelColumnRLE rleCols[WorldConfig::SIZE_X][WorldConfig::SIZE_Z];
+    BlockType blocks[WorldConfig::SIZE_X][WorldConfig::SIZE_Y][WorldConfig::SIZE_Z] __attribute__((aligned(4)));
+    VoxelColumnRLE rleCols[WorldConfig::SIZE_X][WorldConfig::SIZE_Z] __attribute__((aligned(4)));
     u32 canaryAfterBlocks = 0xDEAD0002;
     u32 canaryBeforeFaceCache = 0xDEAD0003;
-    FaceMask faceCache[WorldConfig::SIZE_X][WorldConfig::SIZE_Y][WorldConfig::SIZE_Z];
+    FaceMask faceCache[WorldConfig::SIZE_X][WorldConfig::SIZE_Y][WorldConfig::SIZE_Z] __attribute__((aligned(4)));
     u32 canaryAfterFaceCache = 0xDEAD0004;
 	
     int chunkX, chunkZ;
@@ -233,7 +233,7 @@ private:
     void spreadSkyFromColumn(int xi, int zi, const class ChunkManager* manager, int onlyDir = -1);
 
     u32 canaryBeforeOccupancy = 0xDEAD0005;
-    unsigned int occupancy[WorldConfig::SIZE_X][WorldConfig::SIZE_Z][4] = {};
+    unsigned int occupancy[WorldConfig::SIZE_X][WorldConfig::SIZE_Z][4] __attribute__((aligned(4))) = {};
     u32 canaryAfterOccupancy = 0xDEAD0006;
     ITCM_CODE void rebuildColumnOccupancy(int xi, int zi);
     ITCM_CODE void computeColumnFacesBitwise(int xi, int zi, const class ChunkManager* manager);
@@ -271,7 +271,7 @@ private:
 
     // Líquidos (BlockFluid, RenderBlocks.renderBlockFluids)
     static constexpr int LIQUID_META_BYTES = WorldConfig::SIZE_X * WorldConfig::SIZE_Y * WorldConfig::SIZE_Z / 2;
-    u8 liquidMeta[LIQUID_META_BYTES] = {};
+    u8 liquidMeta[LIQUID_META_BYTES] __attribute__((aligned(4))) = {};
     int liquidMetaGet(int xi, int yi, int zi) const {
         int i = (xi * WorldConfig::SIZE_Y + yi) * WorldConfig::SIZE_Z + zi;
         return (liquidMeta[i >> 1] >> ((i & 1) * 4)) & 0x0F;

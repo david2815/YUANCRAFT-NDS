@@ -49,4 +49,5 @@ void Renderer::setupProjection() {
 
     glFogColor(20, 20, 31, 31); // se sobreescribe cada frame en main.cpp según la hora
     glEnable(GL_FOG);
+    glMatrixMode(GL_MODELVIEW); // Restablecer siempre el modo de matrices a MODELVIEW para proteger la proyección
 }

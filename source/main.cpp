@@ -2491,7 +2491,22 @@ Weather::load();
         glPopMatrix(1);
             }
 
+            glMatrixMode(GL_MODELVIEW);
             { PROF(Prof::DRAW_ALL); chunkManager->drawAll(player->x, player->y, player->z, lookDirX, lookDirY, lookDirZ); }
+
+            // Saneamiento de bus DMA y GPU tras descarte/renderizado de chunks
+            while ((DMA_CR(0) | DMA_CR(3)) & DMA_BUSY);
+            while (GFX_BUSY);
+            glMatrixMode(GL_MODELVIEW);
+
+            // Verificación y saneamiento del stack de matrices ante posibles desbordamientos
+            if (GFX_STATUS & BIT(15)) {
+                glResetMatrixStack();
+                renderer.setupProjection();
+                glMatrixMode(GL_MODELVIEW);
+                player->applyCamera(partialTick, 0.0f);
+            }
+
             const u32 entsStartTicks = Prof::now();   // lo que se dibuja despues del terreno (mobs, objetos, particulas, clima, HUD...)
 
             if (breakHeld && hit.hit && miningChunk != nullptr && miningDamage > 0.0f) { // sin grietas en la bedrock (su fuerza es 0)
@@ -2551,6 +2566,12 @@ Weather::load();
             if (healthState.dead) drawDeathOverlay();
             if (sleepTimer > 0) drawSleepOverlay(Sleeping::overlayAmount(sleepTimer, partialTick) * (thirdPerson ? 0.4f : 1.0f));   // GuiIngame: el velo oscuro al dormir y al despertar (en tercera persona mas claro, para ver al jugador tendido)
             if (timeInPortal > 0.0f) drawPortalOverlay(timeInPortal);
+
+            // Saneamiento del búfer de vértices y aseguramiento de primitivas cerradas antes de glFlush
+            glEnd();
+            while (GFX_BUSY);
+            glMatrixMode(GL_MODELVIEW);
+            GFX_CONTROL |= GL_POLY_OVERFLOW | GL_COLOR_UNDERFLOW;
 
             Prof::add(Prof::ENTS, Prof::now() - entsStartTicks);
             glFlush(0);

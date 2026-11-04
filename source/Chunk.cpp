@@ -45,7 +45,7 @@ static bool s_rebuildDidOne = false;
 // Si una banda no cabe (6144 words = 24 KB; una banda densa de hojas ronda 5000), se arma de nuevo directo en su búfer final.
 static int s_dlAllocFailFrames = 0;   // tras un fallo de memoria, no se reintenta ninguna banda durante unos cuadros
 static const u32 DL_SCRATCH_WORDS = 6144;
-static u32 s_dlScratch[DL_SCRATCH_WORDS + 1];
+static u32 s_dlScratch[DL_SCRATCH_WORDS + 1] __attribute__((aligned(4)));
 
 static const u32 REBUILD_BUDGET_TICKS = 33514 * 4; // ~4 ms
 static u32 s_rebuildBudget = REBUILD_BUDGET_TICKS;   // el presupuesto de este cuadro (Governor lo recorta si el cuadro anterior se pasó)
@@ -53,8 +53,11 @@ static u32 s_rebuildBudget = REBUILD_BUDGET_TICKS;   // el presupuesto de este c
 // glCallList de libnds hace DC_FlushRange en CADA llamada; las listas se vuelcan una sola vez al armarse (flushList) y aqui solo se manda el DMA
 static inline void flushList(const u32* list) { DC_FlushRange((const void*)list, (list[0] + 1) * 4); }
 static inline void callListFast(const u32* list) {
+    if (!list) return;
     const u32 count = *list++;
+    if (count == 0) return;
     while ((DMA_CR(0) | DMA_CR(1) | DMA_CR(2) | DMA_CR(3)) & DMA_BUSY) {}
+    while (GFX_BUSY) {} // Sincronización del bus de geometría para evitar desalineación de matrices
     DMA_SRC(0) = (uint32)list;
     DMA_DEST(0) = 0x4000400;
     DMA_CR(0) = DMA_FIFO | count;
@@ -3297,8 +3300,8 @@ int Chunk::getHighestSolidY(int xi, int zi) const {
 
 bool Chunk::saveToFileAsync(const char* path) const {
     if (!generationComplete) return false;
-    static u8 s_rawSaveBuf[sizeof(blocks) + sizeof(liquidMeta)];
-    static u8 s_compSaveBuf[sizeof(s_rawSaveBuf) + 256];
+    static u8 s_rawSaveBuf[sizeof(blocks) + sizeof(liquidMeta)] __attribute__((aligned(4)));
+    static u8 s_compSaveBuf[sizeof(s_rawSaveBuf) + 256] __attribute__((aligned(4)));
 
     const size_t rawSize = sizeof(blocks) + sizeof(liquidMeta);
     memcpy(s_rawSaveBuf, blocks, sizeof(blocks));
@@ -3319,8 +3322,8 @@ bool Chunk::saveToFile(const char* path) const {
     if (!file) return false;
 
     // Buffer de ensamblado de bloques y metadatos de fluidos (12288 bytes)
-    static u8 s_rawSaveBuf[sizeof(blocks) + sizeof(liquidMeta)];
-    static u8 s_compSaveBuf[sizeof(s_rawSaveBuf) + 256];
+    static u8 s_rawSaveBuf[sizeof(blocks) + sizeof(liquidMeta)] __attribute__((aligned(4)));
+    static u8 s_compSaveBuf[sizeof(s_rawSaveBuf) + 256] __attribute__((aligned(4)));
 
     const size_t rawSize = sizeof(blocks) + sizeof(liquidMeta);
     memcpy(s_rawSaveBuf, blocks, sizeof(blocks));
@@ -3357,8 +3360,8 @@ bool Chunk::loadFromFile(const char* path) {
         return false;
     }
 
-    static u8 s_rawLoadBuf[sizeof(blocks) + sizeof(liquidMeta)];
-    static u8 s_compLoadBuf[sizeof(s_rawLoadBuf) + 256];
+    static u8 s_rawLoadBuf[sizeof(blocks) + sizeof(liquidMeta)] __attribute__((aligned(4)));
+    static u8 s_compLoadBuf[sizeof(s_rawLoadBuf) + 256] __attribute__((aligned(4)));
     bool loadOk = false;
 
     {

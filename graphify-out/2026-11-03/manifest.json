@@ -1170,9 +1170,9 @@
     "semantic_hash": "9d533ac64561cd883648e29b814c9b0f"
   },
   "source/main.cpp": {
-    "mtime": 1793756154.8284192,
-    "seen": 1793756262.614507,
-    "ast_hash": "bd6d51c2356e642c6869639622349a55",
+    "mtime": 1793756952.8043404,
+    "seen": 1793757080.7537155,
+    "ast_hash": "4b877f7e43f9d67185bf14e7af0a1e4e",
     "semantic_hash": ""
   },
   "tools/alphakey.c": {
@@ -1734,27 +1734,39 @@
     "semantic_hash": ""
   },
   "scratch/patch_asm_cpp.py": {
-    "mtime": 1793756120.3909092,
-    "seen": 1793756262.5514271,
-    "ast_hash": "bd0e23a20e805997a26dfe05f7295749",
+    "mtime": 1793756281.5864477,
+    "seen": 1793757080.687114,
+    "ast_hash": "4737f4d461b12911b301b0149f225709",
     "semantic_hash": ""
   },
   "scratch/patch_asm_h.py": {
-    "mtime": 1793756096.0707688,
-    "seen": 1793756262.5514271,
-    "ast_hash": "82dde2ccda9d2ecb7026000b242d57d5",
+    "mtime": 1793756281.633507,
+    "seen": 1793757080.687114,
+    "ast_hash": "a85a87562249680f9b2f82a92806d587",
     "semantic_hash": ""
   },
   "scratch/patch_main_and_ps.py": {
-    "mtime": 1793756145.4190724,
-    "seen": 1793756262.5514271,
-    "ast_hash": "7ba638bd121cdc9935a2fe26109f7e6c",
+    "mtime": 1793756281.685937,
+    "seen": 1793757080.687114,
+    "ast_hash": "a1da1aa48cf300d5a3c49b9191c1e23e",
     "semantic_hash": ""
   },
   "scratch/test_save_progress_simulation.py": {
-    "mtime": 1793756202.6021311,
-    "seen": 1793756262.5539308,
+    "mtime": 1793756283.7154207,
+    "seen": 1793757080.691128,
     "ast_hash": "c50bed552ecc4f10a5a8cdeda1c66627",
+    "semantic_hash": ""
+  },
+  "scratch/patch_main_quit_fix.py": {
+    "mtime": 1793757099.8905349,
+    "seen": 1793758685.454613,
+    "ast_hash": "10372027bcc67d1269f390e3f0f64d9b",
+    "semantic_hash": ""
+  },
+  "scratch/verify_quit_and_lifecycle.py": {
+    "mtime": 1793757101.9567318,
+    "seen": 1793758685.4604037,
+    "ast_hash": "4ed58ff42546b7d343ccb2ec4f31a194",
     "semantic_hash": ""
   }
 }
