@@ -437,23 +437,28 @@ static int computeSkylightSubtract(u32 frames) {
 }
 
 int main(void) {
-    // 1. Inicializacion sincrona inmediata del sistema de archivos FAT
-    // Debe ser lo primero que se ejecute de forma sincrona en el punto de entrada
-    bool fatOk = fatInitDefault();
-
-    // Deshabilitacion condicional absoluta de lectura/escritura de logs en SD si FAT falla
-    // El juego prioriza arrancar los menus por encima de la depuracion
-    DebugLogger::init(fatOk);
-
-    // 2. Registro e inicializacion prioritaria de interrupciones de hardware
+    // 1. Registro e inicializacion prioritaria de interrupciones de hardware
     irqInit();
     irqEnable(IRQ_VBLANK);
 
-    // 3. Inicializacion de la consola nativa de texto en pantalla inferior
+    // 2. Inicializacion de la consola nativa de texto en pantalla inferior
     consoleDemoInit();
 
-    // 4. Deteccion basica de plataforma sin alterar reloj ni registros TWL (67 MHz NTR base)
+    // 3. Deteccion basica de plataforma sin alterar reloj ni registros TWL (67 MHz NTR base)
     g_isDSi = isDSiMode();
+
+    // Sincronizacion y purga de coprocesadores matematicos (REG_DIV / REG_SQRT inactivos)
+    HwMath::sync();
+
+    // 4. Retraso de seguridad de hardware de 30 frames para permitir la estabilizacion fisica
+    // de los bancos de memoria y el bus SD antes de acceder al sistema de archivos
+    for (int i = 0; i < 30; i++) {
+        swiWaitForVBlank();
+    }
+
+    // 5. Inicializacion sincrona y segura del sistema de archivos FAT tras estabilizacion
+    bool fatOk = fatInitDefault();
+    DebugLogger::init(fatOk);
 
     if (!fatOk) {
         iprintf("[DEBUG] AVISO: SD no disponible / libfat fallo. Modo seguro en pantalla.\n");
@@ -463,21 +468,7 @@ int main(void) {
         DebugLogger::log("[DEBUG] Sistema de archivos FAT inicializado correctamente.");
     }
 
-    // Sincronizacion y purga de coprocesadores matematicos (REG_DIV / REG_SQRT inactivos)
-    HwMath::sync();
-
-    // 5. Inicializacion del subsistema grafico 3D en pantalla superior
-    Renderer renderer;
-    renderer.init();
-    renderer.setupProjection();
-
-    // 6. Retraso de seguridad de hardware de 30 frames inmediatamente despues de inicializar
-    // la pantalla superior para permitir la estabilizacion fisica de los bancos de VRAM y el bus SD
-    for (int i = 0; i < 30; i++) {
-        swiWaitForVBlank();
-    }
-
-    // 7. Pantallas de inicio (logos de Eagtek y Mojang) a reloj base seguro (67 MHz)
+    // 6. Pantallas de inicio (logos de Eagtek y Mojang) a reloj base seguro (67 MHz)
     // Sin hilos de fondo ni solicitudes IPC, usando unicamente bucles simples con swiWaitForVBlank()
     StartupSplash::show();
 
@@ -562,6 +553,10 @@ int main(void) {
         Controls::load();   // perfiles de controles (controlsprofile.dat)
         WorldSave::recoverInterruptedSession();
     }
+    Renderer renderer;
+    renderer.init();
+    renderer.setupProjection();
+
     Sound::init();   // los menus tambien suenan
     autoJumpEnabled = Options::get().autoJump;
     controlMode = Options::get().controlMode;

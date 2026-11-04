@@ -4,7 +4,7 @@
 #include "mojanglogo.h"
 
 namespace {
-    const int LOGO_FRAMES = 60;   // 1 segundo por logo, cambio síncrono limpio
+    const int LOGO_FRAMES = 60;   // 1 segundo por logo
 
     void showLogo(const unsigned int* bitmap, const unsigned short* pal, unsigned int palLen, bool hold) {
         swiWaitForVBlank();   // Sincronizar con el inicio de cuadro
@@ -13,18 +13,15 @@ namespace {
         vramSetBankB(VRAM_B_MAIN_BG_0x06000000);
         const int id = bgInit(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0);
 
-        // 1. Limpieza explícita del búfer de video en VRAM y paleta de color
+        // Limpieza de pantalla y paleta
         u16* gfx = (u16*)bgGetGfxPtr(id);
-        dmaFillWords(0, gfx, 256 * 256);
+        dmaFillWords(0, gfx, 256 * 192);
         dmaFillHalfWords(0, BG_PALETTE, 512);
 
-        // 2. Limpieza de registros de interrupciones pendientes
-        REG_IF = REG_IF;
-
+        // Copiar paleta y descomprimir bitmap directamente en VRAM
         dmaCopy(pal, BG_PALETTE, palLen);
-        decompress(bitmap, gfx, LZ77Vram);   // Descompresión directa a VRAM
+        decompress(bitmap, gfx, LZ77Vram);
 
-        // 3. Bucle simple con swiWaitForVBlank() sin hilos ni solicitudes IPC
         if (hold) {
             for (int f = 0; f < LOGO_FRAMES; f++) {
                 swiWaitForVBlank();
@@ -34,20 +31,13 @@ namespace {
 }
 
 void StartupSplash::show() {
-    // Limpieza de interrupciones y estado de cola IPC antes del despliegue del logo
-    REG_IF = REG_IF;
-    REG_IPC_FIFO_CR = IPC_FIFO_ENABLE | IPC_FIFO_SEND_CLEAR;
-
-    // Pantalla inferior: sin capas activas, color neutro limpio
-    videoSetModeSub(MODE_0_2D);
-    setBackdropColorSub(RGB15(31, 31, 31));
-
-    // Despliegue secuencial de logos con limpieza de buffers
+    // Despliegue secuencial de logos sin alterar registros de interrupción ni registros de control FIFO
     showLogo((const unsigned int*)eagteklogoBitmap, eagteklogoPal, eagteklogoPalLen, true);
     showLogo((const unsigned int*)mojanglogoBitmap, mojanglogoPal, mojanglogoPalLen, true);
 }
 
 void StartupSplash::finish() {
+    // Restaurar el color de fondo neutro y la consola de depuración en pantalla inferior
     setBackdropColorSub(0);
-    consoleDemoInit();   // Consola inferior normal tras la pantalla de presentación
 }
+
