@@ -144,3 +144,4 @@ with open('source/main.cpp', 'w', encoding='utf-8', newline='\r\n') as f:
     f.write(norm_content.replace('\n', '\r\n'))
 
 print("Patch applied successfully to source/main.cpp!")
+

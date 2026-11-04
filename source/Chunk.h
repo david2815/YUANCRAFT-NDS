@@ -240,8 +240,8 @@ private:
     u32 canaryBeforeOccupancy = 0xDEAD0005;
     unsigned int occupancy[WorldConfig::SIZE_X][WorldConfig::SIZE_Z][4] __attribute__((aligned(4))) = {};
     u32 canaryAfterOccupancy = 0xDEAD0006;
-    ITCM_CODE void rebuildColumnOccupancy(int xi, int zi);
-    ITCM_CODE void computeColumnFacesBitwise(int xi, int zi, const class ChunkManager* manager);
+    void rebuildColumnOccupancy(int xi, int zi);
+    void computeColumnFacesBitwise(int xi, int zi, const class ChunkManager* manager);
     u8 getFaceLightRaw(int nxi, int nyi, int nzi, const class ChunkManager* manager) const;
     bool initialSkyLightPending = false;
     bool checkMemoryCanaries() const {

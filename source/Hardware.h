@@ -25,7 +25,7 @@ private:
     static inline bool& initedRef() { static bool i = false; return i; }
 
     // Conmutación segura de frecuencia ejecutada en ITCM conforme a las especificaciones GBATEK
-    ITCM_CODE static void applyClockSafeTWL() {
+    static void applyClockSafeTWL() {
         // Preservar configuración previa de EXMEMCNT (waitstates de bus de VRAM, ROM y SD)
         u16 oldExmem = REG_EXMEMCNT;
 

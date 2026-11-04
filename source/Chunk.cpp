@@ -4894,7 +4894,7 @@ void Chunk::syncBlocksFromRLE() {
     }
 }
 
-ITCM_CODE void Chunk::rebuildColumnOccupancy(int xi, int zi) {
+void Chunk::rebuildColumnOccupancy(int xi, int zi) {
     occupancy[xi][zi][0] = 0;
     occupancy[xi][zi][1] = 0;
     occupancy[xi][zi][2] = 0;
@@ -4907,7 +4907,7 @@ ITCM_CODE void Chunk::rebuildColumnOccupancy(int xi, int zi) {
     }
 }
 
-ITCM_CODE void Chunk::computeColumnFacesBitwise(int xi, int zi, const ChunkManager* manager) {
+void Chunk::computeColumnFacesBitwise(int xi, int zi, const ChunkManager* manager) {
     unsigned int* occ = occupancy[xi][zi];
 
     unsigned int aboveMask[4], belowMask[4];

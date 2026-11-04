@@ -156,15 +156,15 @@
     "semantic_hash": "ecb86b867a5a7e15403ef4f577ff7720"
   },
   "source/Chunk.cpp": {
-    "mtime": 1793803306.5313127,
-    "seen": 1793803562.6888356,
-    "ast_hash": "7dbae0d51b6c8b5a148270c7943d1545",
+    "mtime": 1793806629.674787,
+    "seen": 1793807120.1575265,
+    "ast_hash": "82fea4bc9e429a12f417e7843d1e897a",
     "semantic_hash": ""
   },
   "source/Chunk.h": {
-    "mtime": 1793803306.525833,
-    "seen": 1793803562.6888356,
-    "ast_hash": "12e0433ff100079a3cf7c1de41d26b49",
+    "mtime": 1793806629.671284,
+    "seen": 1793807120.1575265,
+    "ast_hash": "01cd8381fa37aa610f52dd3f6840f5be",
     "semantic_hash": ""
   },
   "source/ChunkManager.cpp": {
@@ -792,15 +792,15 @@
     "semantic_hash": "7b2ae72d45e256b0fdb04bb37ab2bf4a"
   },
   "source/Player.cpp": {
-    "mtime": 1793751384.7787561,
-    "seen": 1793751620.8317814,
-    "ast_hash": "1171259f242d17b916393f97816d1557",
+    "mtime": 1793806629.6763005,
+    "seen": 1793807120.1881335,
+    "ast_hash": "d82f7c6dc705ed30eb0d54a9aed98aa9",
     "semantic_hash": ""
   },
   "source/Player.h": {
-    "mtime": 1793751384.7777622,
-    "seen": 1793751620.8317814,
-    "ast_hash": "012673af7e90d0077eea65b04b053686",
+    "mtime": 1793806629.6757877,
+    "seen": 1793807120.1881335,
+    "ast_hash": "9e2e394497594417857aee7d6d79f09f",
     "semantic_hash": ""
   },
   "source/Profiler.cpp": {
@@ -1002,10 +1002,10 @@
     "semantic_hash": "9768c4d9186738c19c6f861debbc8a71"
   },
   "source/StartupSplash.cpp": {
-    "mtime": 1793745619.6933353,
-    "seen": 1793746707.0046196,
-    "ast_hash": "1b382038d296dc70a696b48ea89f0399",
-    "semantic_hash": "1b382038d296dc70a696b48ea89f0399"
+    "mtime": 1793806735.9462936,
+    "seen": 1793807120.1976461,
+    "ast_hash": "3a78f1a94685aaefd12441bcc838b34d",
+    "semantic_hash": ""
   },
   "source/StartupSplash.h": {
     "mtime": 1793745619.694346,
@@ -1170,9 +1170,9 @@
     "semantic_hash": ""
   },
   "source/main.cpp": {
-    "mtime": 1793805835.7235353,
-    "seen": 1793805914.3428795,
-    "ast_hash": "16da3411a8340d8d0c52fdfc389609ea",
+    "mtime": 1793806874.2766201,
+    "seen": 1793807120.2046516,
+    "ast_hash": "06b75dbe74f8ca3457f32e382321f4f9",
     "semantic_hash": ""
   },
   "tools/alphakey.c": {
@@ -1500,9 +1500,9 @@
     "semantic_hash": "4b5e96997207352e8516f3301678c5ab"
   },
   "source/Hardware.h": {
-    "mtime": 1793805556.6892042,
-    "seen": 1793805770.7687802,
-    "ast_hash": "d523b704309bea6f871f618f2d480bad",
+    "mtime": 1793806629.6782937,
+    "seen": 1793807120.1685517,
+    "ast_hash": "8485b2209e462bf3bca6d78f78681cdf",
     "semantic_hash": ""
   },
   "source/ChunkCompression.h": {
@@ -1512,9 +1512,9 @@
     "semantic_hash": ""
   },
   "source/VoxelRLE.h": {
-    "mtime": 1793803306.5392096,
-    "seen": 1793803562.7382202,
-    "ast_hash": "bfb1fb60a3765ebe7459faf7cab93b87",
+    "mtime": 1793806629.6772947,
+    "seen": 1793807120.203144,
+    "ast_hash": "7e594ce1165222edafbb741ead1aa416",
     "semantic_hash": ""
   },
   "scratch/fix_chunk.py": {
@@ -1878,33 +1878,57 @@
     "semantic_hash": ""
   },
   "source/DebugLogger.cpp": {
-    "mtime": 1793805531.6998627,
-    "seen": 1793805770.7627745,
+    "mtime": 1793805985.2997491,
+    "seen": 1793807120.162026,
     "ast_hash": "3751dce715ed12fa475de65ea4028263",
     "semantic_hash": ""
   },
   "source/DebugLogger.h": {
-    "mtime": 1793805521.1703253,
-    "seen": 1793805770.7627745,
+    "mtime": 1793805985.348297,
+    "seen": 1793807120.162026,
     "ast_hash": "854415d5216d3df62cff040378695640",
     "semantic_hash": ""
   },
   "scratch/patch_main.py": {
-    "mtime": 1793805647.3895013,
-    "seen": 1793805770.7390096,
-    "ast_hash": "8d0a12193a144970dbd10731a8adbefb",
+    "mtime": 1793805983.7242093,
+    "seen": 1793807120.139015,
+    "ast_hash": "0763a208065fe82d3801e9f032b39dcc",
     "semantic_hash": ""
   },
   "scratch/verify_startup_sequence_simulation.py": {
-    "mtime": 1793805738.9234776,
-    "seen": 1793805770.747764,
-    "ast_hash": "dbe6f8877cd21d4524a13f3ec6bccefb",
+    "mtime": 1793805983.7820752,
+    "seen": 1793807120.1480155,
+    "ast_hash": "6147142a20cc4ada713c79d9f44daa99",
     "semantic_hash": ""
   },
   "scratch/verify_startup_sequence_structural.py": {
-    "mtime": 1793805708.664887,
-    "seen": 1793805770.747764,
-    "ast_hash": "d8d5751d2a64a44d6b3d132de689a67c",
+    "mtime": 1793805983.8243053,
+    "seen": 1793807120.1480155,
+    "ast_hash": "9f5c67fabca7dcf1a8ffaf598a539726",
+    "semantic_hash": ""
+  },
+  "scratch/patch_main_safe_seq.py": {
+    "mtime": 1793806858.8464563,
+    "seen": 1793807120.140011,
+    "ast_hash": "d7090c9fb23883f1e227d58913796684",
+    "semantic_hash": ""
+  },
+  "scratch/remove_itcm.py": {
+    "mtime": 1793806616.3261309,
+    "seen": 1793807120.1425164,
+    "ast_hash": "789e5f82f4e9a339a1dae59b94ab89d0",
+    "semantic_hash": ""
+  },
+  "scratch/verify_phase2_simulation.py": {
+    "mtime": 1793807088.955343,
+    "seen": 1793807120.1470156,
+    "ast_hash": "9a53a749a99fc001dd3048e575120f17",
+    "semantic_hash": ""
+  },
+  "scratch/verify_phase2_structural.py": {
+    "mtime": 1793807069.2615767,
+    "seen": 1793807120.1470156,
+    "ast_hash": "8193db0b5bda6df7133b6d9d8500b409",
     "semantic_hash": ""
   }
 }

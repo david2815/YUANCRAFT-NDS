@@ -90,7 +90,7 @@ bool Player::tryStepUp(const ChunkManager& chunkManager, float dx, float dz) {
     return false;
 }
 
-ITCM_CODE bool Player::collidesAt(const ChunkManager& chunkManager, float testX, float testY, float testZ) const {
+bool Player::collidesAt(const ChunkManager& chunkManager, float testX, float testY, float testZ) const {
     // Muestreamos 4 alturas repartidas entre los pies y la cabeza,
     // separadas por menos de 1 unidad — así ningún bloque de tamaño
     // normal (1 unidad) puede "colarse" sin tocar ningún punto
@@ -117,7 +117,7 @@ void Player::handleInput(u32 keysHeld, const ChunkManager& chunkManager) {
     (void)chunkManager;
 }
 
-ITCM_CODE void Player::physicsTick(u32 keysHeld, const ChunkManager& chunkManager, bool autoJumpEnabled) {
+void Player::physicsTick(u32 keysHeld, const ChunkManager& chunkManager, bool autoJumpEnabled) {
     prevTickY = y;
     prevTickX = x;
     prevTickZ = z;
