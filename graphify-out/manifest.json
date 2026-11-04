@@ -1758,14 +1758,14 @@
     "semantic_hash": ""
   },
   "scratch/patch_main_quit_fix.py": {
-    "mtime": 1793756944.2199776,
-    "seen": 1793757080.6876245,
-    "ast_hash": "5f078aa5f8d532d09f14fc1d0ee2bda3",
+    "mtime": 1793757099.8905349,
+    "seen": 1793758685.454613,
+    "ast_hash": "10372027bcc67d1269f390e3f0f64d9b",
     "semantic_hash": ""
   },
   "scratch/verify_quit_and_lifecycle.py": {
-    "mtime": 1793757031.9068255,
-    "seen": 1793757080.6931493,
+    "mtime": 1793757101.9567318,
+    "seen": 1793758685.4604037,
     "ast_hash": "4ed58ff42546b7d343ccb2ec4f31a194",
     "semantic_hash": ""
   }
