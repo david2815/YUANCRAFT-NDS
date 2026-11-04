@@ -437,26 +437,31 @@ static int computeSkylightSubtract(u32 frames) {
 }
 
 int main(void) {
-    // 1. Registro e inicializacion prioritaria de interrupciones de hardware
-    irqInit();
+    // 1. Encendido explícito de hardware 2D y pantallas LCD (evita pantalla blanca por falta de energía en pantallas)
+    powerOn(POWER_ALL_2D);
+
+    // 2. Activación de interrupciones VBlank requeridas para sincronización de vídeo
+    // IMPORTANTE: NO llamar a irqInit() aquí. crt0 ya ejecutó initSystem(), que configuró
+    // irqTable y fifoInit(). Llamar a irqInit() borraría el manejador de interrupciones FIFO
+    // impidiendo la comunicación con ARM7 (causa raíz del cuelgue en DSi con libfat/SDMMC).
     irqEnable(IRQ_VBLANK);
 
-    // 2. Inicializacion de la consola nativa de texto en pantalla inferior
+    // 3. Inicialización de la consola nativa de texto en pantalla inferior
     consoleDemoInit();
 
-    // 3. Deteccion basica de plataforma sin alterar reloj ni registros TWL (67 MHz NTR base)
+    // 4. Detección básica de plataforma sin alterar reloj ni registros TWL (67 MHz NTR base)
     g_isDSi = isDSiMode();
 
-    // Sincronizacion y purga de coprocesadores matematicos (REG_DIV / REG_SQRT inactivos)
+    // Sincronización y purga de coprocesadores matemáticos (REG_DIV / REG_SQRT inactivos)
     HwMath::sync();
 
-    // 4. Retraso de seguridad de hardware de 30 frames para permitir la estabilizacion fisica
-    // de los bancos de memoria y el bus SD antes de acceder al sistema de archivos
-    for (int i = 0; i < 30; i++) {
-        swiWaitForVBlank();
-    }
+    // 5. Despliegue inmediato de las pantallas de inicio (logos de Eagtek y Mojang) a reloj base (67 MHz)
+    // El primer logo aparece de forma instantánea al encender la consola (sin pantallas en blanco).
+    // Los 120 cuadros (2 segundos) de los logos proporcionan la estabilización física completa
+    // de los buses de hardware, VRAM y tarjeta SD antes de realizar operaciones de disco.
+    StartupSplash::show();
 
-    // 5. Inicializacion sincrona y segura del sistema de archivos FAT tras estabilizacion
+    // 6. Inicialización síncrona y segura del sistema de archivos FAT con canal FIFO intacto
     bool fatOk = fatInitDefault();
     DebugLogger::init(fatOk);
 
@@ -467,10 +472,6 @@ int main(void) {
         iprintf("[DEBUG] libfat inicializado correctamente.\n");
         DebugLogger::log("[DEBUG] Sistema de archivos FAT inicializado correctamente.");
     }
-
-    // 6. Pantallas de inicio (logos de Eagtek y Mojang) a reloj base seguro (67 MHz)
-    // Sin hilos de fondo ni solicitudes IPC, usando unicamente bucles simples con swiWaitForVBlank()
-    StartupSplash::show();
 
     u32 gameTimeTicks = 0;
     int dlMaxKB = 0;

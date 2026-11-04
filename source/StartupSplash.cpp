@@ -4,24 +4,27 @@
 #include "mojanglogo.h"
 
 namespace {
-    const int LOGO_FRAMES = 60;   // 1 segundo por logo
+    const int LOGO_FRAMES = 60;   // 1 segundo por logo (60 frames a 60 Hz)
 
     void showLogo(const unsigned int* bitmap, const unsigned short* pal, unsigned int palLen, bool hold) {
-        swiWaitForVBlank();   // Sincronizar con el inicio de cuadro
-
+        // 1. Configurar modo gráfico 2D y banco de VRAM B en pantalla principal
         videoSetMode(MODE_5_2D | DISPLAY_BG3_ACTIVE);
         vramSetBankB(VRAM_B_MAIN_BG_0x06000000);
         const int id = bgInit(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0);
 
-        // Limpieza de pantalla y paleta
+        // 2. Limpieza de pantalla y paleta inicial a negro para evitar artefactos visuales
         u16* gfx = (u16*)bgGetGfxPtr(id);
         dmaFillWords(0, gfx, 256 * 192);
         dmaFillHalfWords(0, BG_PALETTE, 512);
 
-        // Copiar paleta y descomprimir bitmap directamente en VRAM
-        dmaCopy(pal, BG_PALETTE, palLen);
+        // 3. Descomprimir bitmap directamente en VRAM
         decompress(bitmap, gfx, LZ77Vram);
 
+        // 4. Copiar paleta sincronizada en VBlank para despliegue instantáneo sin tearing
+        swiWaitForVBlank();
+        dmaCopy(pal, BG_PALETTE, palLen);
+
+        // 5. Mantener en pantalla durante los frames requeridos
         if (hold) {
             for (int f = 0; f < LOGO_FRAMES; f++) {
                 swiWaitForVBlank();
