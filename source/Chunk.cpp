@@ -2918,6 +2918,12 @@ void Chunk::draw(float playerX, float playerY, float playerZ,
             if (((e * CONE_COS - d * CONE_SIN) >> 8) > BAND_R) continue; // fuera del cono
         }
 
+        // Comprobación de desbordamiento de polígonos por hardware en la GPU
+        if (GFX_CONTROL & GL_POLY_OVERFLOW) {
+            if (vertBudget) *vertBudget = 0;
+            break;
+        }
+
         const int bandVerts = dlBandVertCount[band] + dlBandVertCount2[band];
         if (vertBudget && bandVerts > *vertBudget) continue;
 

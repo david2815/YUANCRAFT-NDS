@@ -48,10 +48,10 @@
     "semantic_hash": "65ae7be60b7f91fd03d51673fa75ce4b"
   },
   "source/AnimalModel.cpp": {
-    "mtime": 1793745619.5411654,
-    "seen": 1793746707.0046196,
-    "ast_hash": "c630b61dfaa1aabf44be57b2e32e144d",
-    "semantic_hash": "c630b61dfaa1aabf44be57b2e32e144d"
+    "mtime": 1793761458.4298882,
+    "seen": 1793761530.6215506,
+    "ast_hash": "68bfb6eee0ee9dd3f064683f76b587e0",
+    "semantic_hash": ""
   },
   "source/AnimalModel.h": {
     "mtime": 1793745619.5418768,
@@ -156,9 +156,9 @@
     "semantic_hash": "ecb86b867a5a7e15403ef4f577ff7720"
   },
   "source/Chunk.cpp": {
-    "mtime": 1793759702.1770883,
-    "seen": 1793759812.9589183,
-    "ast_hash": "d2765237625b5ef7a90d080c4e2fff71",
+    "mtime": 1793761246.7582195,
+    "seen": 1793761530.6281388,
+    "ast_hash": "7ba6d402813778f521ae2eb15b1c37ac",
     "semantic_hash": ""
   },
   "source/Chunk.h": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "source/ChunkManager.cpp": {
-    "mtime": 1793753171.241423,
-    "seen": 1793753588.1377823,
-    "ast_hash": "efe2bceca20e0f606d6e7261d7b24705",
+    "mtime": 1793761246.753715,
+    "seen": 1793761530.6291385,
+    "ast_hash": "abf0650ddabf0ebd212b9fb7ce7bf9e0",
     "semantic_hash": ""
   },
   "source/ChunkManager.h": {
@@ -384,10 +384,10 @@
     "semantic_hash": ""
   },
   "source/HandAnimations.cpp": {
-    "mtime": 1793745619.6213593,
-    "seen": 1793746707.0046196,
-    "ast_hash": "1e4e79a04221eae60181519fba675b49",
-    "semantic_hash": "1e4e79a04221eae60181519fba675b49"
+    "mtime": 1793761458.4308994,
+    "seen": 1793761530.6396475,
+    "ast_hash": "a9e4a9893edecc855692f6919e0bfe2f",
+    "semantic_hash": ""
   },
   "source/HandAnimations.h": {
     "mtime": 1793745619.6221564,
@@ -402,10 +402,10 @@
     "semantic_hash": "818026998981b7b247b00a08235d623c"
   },
   "source/HealthHud.cpp": {
-    "mtime": 1793745619.624155,
-    "seen": 1793746707.0046196,
-    "ast_hash": "57db4822f36998acad64427745903477",
-    "semantic_hash": "57db4822f36998acad64427745903477"
+    "mtime": 1793761246.764231,
+    "seen": 1793761530.640647,
+    "ast_hash": "29b0a12ff10567fb1b630ea826efd1c0",
+    "semantic_hash": ""
   },
   "source/HealthHud.h": {
     "mtime": 1793745619.6246672,
@@ -936,10 +936,10 @@
     "semantic_hash": "e7c3f0d073ca740ac8d4c6e8b31bd142"
   },
   "source/Sky.cpp": {
-    "mtime": 1793745619.6808708,
-    "seen": 1793746707.0046196,
-    "ast_hash": "d8315b76cafd3e6a6208ce20a7f98f6f",
-    "semantic_hash": "d8315b76cafd3e6a6208ce20a7f98f6f"
+    "mtime": 1793761246.7622378,
+    "seen": 1793761530.6672719,
+    "ast_hash": "1764d6dcc165fe80073b68aa0dfbeeea",
+    "semantic_hash": ""
   },
   "source/Sky.h": {
     "mtime": 1793745619.6808708,
@@ -1014,10 +1014,10 @@
     "semantic_hash": "36175e15e9373921653c17d4da6d2046"
   },
   "source/SteveModel.cpp": {
-    "mtime": 1793745619.694346,
-    "seen": 1793746707.0046196,
-    "ast_hash": "79c56ca9563c95ff4457b376019aec3d",
-    "semantic_hash": "79c56ca9563c95ff4457b376019aec3d"
+    "mtime": 1793761458.428877,
+    "seen": 1793761530.6697745,
+    "ast_hash": "7019d8e4aeb0cb0149c1bac1cf87bb41",
+    "semantic_hash": ""
   },
   "source/SteveModel.h": {
     "mtime": 1793745619.6953588,
@@ -1146,10 +1146,10 @@
     "semantic_hash": "e8374debcb1d710a838ff3a2e1c86ff0"
   },
   "source/WorldSave.cpp": {
-    "mtime": 1793745619.7087004,
-    "seen": 1793746707.0046196,
-    "ast_hash": "b9c1c554ab86ec1ad0c3ec8fc85a9f19",
-    "semantic_hash": "b9c1c554ab86ec1ad0c3ec8fc85a9f19"
+    "mtime": 1793761246.7517207,
+    "seen": 1793761530.676779,
+    "ast_hash": "088b766a218877da884d22ad25c15455",
+    "semantic_hash": ""
   },
   "source/WorldSave.h": {
     "mtime": 1793745619.7097113,
@@ -1158,21 +1158,21 @@
     "semantic_hash": "4418870e5fe032fbafe759259db1f8c2"
   },
   "source/WorldSelectMenu.cpp": {
-    "mtime": 1793745619.7107248,
-    "seen": 1793746707.0046196,
-    "ast_hash": "7f86f4239642c6cf522d97edffd0bd24",
-    "semantic_hash": "7f86f4239642c6cf522d97edffd0bd24"
+    "mtime": 1793761311.269886,
+    "seen": 1793761530.676779,
+    "ast_hash": "1944dcf16ed283c93beab7d9c6c96ff7",
+    "semantic_hash": ""
   },
   "source/WorldSelectMenu.h": {
-    "mtime": 1793745619.7107248,
-    "seen": 1793746707.0046196,
-    "ast_hash": "9d533ac64561cd883648e29b814c9b0f",
-    "semantic_hash": "9d533ac64561cd883648e29b814c9b0f"
+    "mtime": 1793761246.7502086,
+    "seen": 1793761530.676779,
+    "ast_hash": "23634935a8f7ba26a7267df55d5ed7b3",
+    "semantic_hash": ""
   },
   "source/main.cpp": {
-    "mtime": 1793759702.1811318,
-    "seen": 1793759813.0087528,
-    "ast_hash": "4045310c6b1e60aee710054b884286f7",
+    "mtime": 1793761246.7617252,
+    "seen": 1793761530.676779,
+    "ast_hash": "ec586e92f0b2473cce4eedacc06cbd1a",
     "semantic_hash": ""
   },
   "tools/alphakey.c": {
@@ -1644,9 +1644,9 @@
     "semantic_hash": ""
   },
   "source/HwMath.h": {
-    "mtime": 1793751618.078119,
-    "seen": 1793751620.816771,
-    "ast_hash": "8bbcad371d002a543ce24de5ec57ca0a",
+    "mtime": 1793761246.7517207,
+    "seen": 1793761530.6431499,
+    "ast_hash": "4da899b0ff5b11dc04780b143ca7fc95",
     "semantic_hash": ""
   },
   "scratch/fix_sm_and_main.py": {
@@ -1770,21 +1770,57 @@
     "semantic_hash": ""
   },
   "scratch/apply_vram_and_gpu_sanitization.py": {
-    "mtime": 1793759685.5169036,
-    "seen": 1793759812.9400349,
-    "ast_hash": "0abf14abf0a1091b7d0709906d733756",
+    "mtime": 1793759877.0420315,
+    "seen": 1793761530.608533,
+    "ast_hash": "bab61a056818b7d92b536d2af27eab24",
     "semantic_hash": ""
   },
   "scratch/verify_vram_and_gpu_sanitization.py": {
-    "mtime": 1793759753.2783139,
-    "seen": 1793759812.9508975,
-    "ast_hash": "d5e6708e02f51a8ff616d2df79dcabca",
+    "mtime": 1793759877.1308422,
+    "seen": 1793761530.6190434,
+    "ast_hash": "f0aa832daacc7fbbe4263a982f69bce8",
     "semantic_hash": ""
   },
   "scratch/verify_vram_and_gpu_simulation.py": {
-    "mtime": 1793759783.3801737,
-    "seen": 1793759812.9508975,
-    "ast_hash": "de5062543759f605e628401b5229b2a2",
+    "mtime": 1793759877.2021136,
+    "seen": 1793761530.6190434,
+    "ast_hash": "0d9e061fb9276a5fd37d86c2f4477c3f",
+    "semantic_hash": ""
+  },
+  "scratch/apply_polygon_and_world_fixes.py": {
+    "mtime": 1793761232.526152,
+    "seen": 1793761530.608533,
+    "ast_hash": "6fde82a28efbaa9378d5492252235c15",
+    "semantic_hash": ""
+  },
+  "scratch/fix_subpath.py": {
+    "mtime": 1793761306.6342404,
+    "seen": 1793761530.6105323,
+    "ast_hash": "257e0b608f17d1719e5d5592e03fd5a6",
+    "semantic_hash": ""
+  },
+  "scratch/patch_hand_map.py": {
+    "mtime": 1793761357.1176372,
+    "seen": 1793761530.6112883,
+    "ast_hash": "a335d3771ceb7543d02355aab204def2",
+    "semantic_hash": ""
+  },
+  "scratch/update_fast_div.py": {
+    "mtime": 1793761452.6896198,
+    "seen": 1793761530.6155393,
+    "ast_hash": "c4758f38fd6ceff31214fe1cb0fe3a6a",
+    "semantic_hash": ""
+  },
+  "scratch/verify_polygon_and_world_fixes.py": {
+    "mtime": 1793761338.5943255,
+    "seen": 1793761530.618048,
+    "ast_hash": "bf896d9476effb529ff6af0abf8fd1c8",
+    "semantic_hash": ""
+  },
+  "scratch/verify_world_select_simulation.py": {
+    "mtime": 1793761474.7327752,
+    "seen": 1793761530.6190434,
+    "ast_hash": "8060ca93d8a53e243514ce291e554d49",
     "semantic_hash": ""
   }
 }

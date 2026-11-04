@@ -37,12 +37,12 @@ void Sky::draw(float ex, float ey, float ez, float angle, float rain, int skyR, 
         glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
         glBindTexture(0, 0);
         glPolyFmt(POLY_ALPHA(30) | POLY_CULL_NONE | POLY_ID(40));   // 30 de 31: no escribe profundidad y se mezcla con el fondo
-        glBegin(GL_TRIANGLES);
         float px[17], py[17], pz[17];
         for (int i = 0; i <= 16; i++) {
             const float t = (float)i * PI_F * 2.0f / 16.0f, s = sinf(t), co = cosf(t);
             px[i] = s * 120.0f; py[i] = co * 120.0f; pz[i] = -co * 40.0f * a;
         }
+        glBegin(GL_TRIANGLES);
         for (int i = 0; i < 16; i++) {
             glColor3b(cr > 255 ? 255 : cr, cg > 255 ? 255 : cg, cb > 255 ? 255 : cb); vert(0.0f, 100.0f, 0.0f);
             glColor3b(skyR * 8, skyG * 8, skyB * 8); vert(px[i], py[i], pz[i]);

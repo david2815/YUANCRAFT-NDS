@@ -7,6 +7,9 @@ public:
     // el fondo correspondiente (con o sin mundos) + el nombre inicial.
     static void init();
 
+    // Reconstruye de forma segura la lista dinámica de mundos escaneando /mcdsefiles/worlds/
+    static void refreshWorldList();
+
     // Llamar después de Create/Delete — rearma la lista y el fondo
     // (puede cambiar entre "hay mundos"/"no hay mundos").
     static void refresh();

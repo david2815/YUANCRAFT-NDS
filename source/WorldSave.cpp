@@ -1,3 +1,4 @@
+#include "WorldSelectMenu.h"
 #include "WorldSave.h"
 #include <sys/stat.h>
 #include <unistd.h>
@@ -51,6 +52,7 @@ static void clearFolderContents(const char* folderPath) {
             clearFolderContents(fullPath);
             rmdir(fullPath);
         } else {
+            unlink(fullPath);
             remove(fullPath);
         }
     }
@@ -256,4 +258,6 @@ bool WorldSave::worldExists(const char* path) {
 void WorldSave::deleteWorld(const char* path) {
     clearFolderContents(path);
     rmdir(path);
+    // Reconstruir inmediatamente la lista dinámica de mundos y reindexar
+    WorldSelectMenu::refreshWorldList();
 }

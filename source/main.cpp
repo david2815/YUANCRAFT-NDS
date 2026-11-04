@@ -1,3 +1,4 @@
+#include "HwMath.h"
 #include "Hardware.h"
 
 bool g_isDSi = false;
@@ -2446,6 +2447,13 @@ Weather::load();
         glFogColor(skyR, skyG, skyB, 31);
 
 	if (shouldRender) {
+            // Sincronizar registros matemáticos y tubería de geometría antes de cada renderizado
+            HwMath::sync();
+            while ((DMA_CR(0) | DMA_CR(3)) & DMA_BUSY);
+            while (GFX_BUSY);
+            glMatrixMode(GL_MODELVIEW);
+            glLoadIdentity();
+
             // La mano va PRIMERO — así nunca se pierde aunque el terreno
             // sature el presupuesto de polígonos del frame (la GPU descarta
             // en silencio lo que venga DESPUÉS del límite, no lo que ya se mandó).

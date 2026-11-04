@@ -27,8 +27,15 @@ public:
     // Operaciones de División Asíncronas
     // ------------------------------------------------------------------------
 
+    // Sincronización completa de los registros matemáticos de hardware
+    static inline void sync() {
+        while (REG_DIVCNT & DIV_BUSY);
+        while (REG_SQRTCNT & SQRT_BUSY);
+    }
+
     // Inicia división entera 32 / 32
     static inline void startDiv32(int32_t numer, int32_t denom) {
+        while (REG_DIVCNT & DIV_BUSY);
         REG_DIVCNT = DIV_32_32;
         REG_DIV_NUMER_L = numer;
         REG_DIV_DENOM_L = denom;
@@ -36,6 +43,7 @@ public:
 
     // Inicia división 64 / 32 (útil para números grandes o punto fijo)
     static inline void startDiv64_32(int64_t numer, int32_t denom) {
+        while (REG_DIVCNT & DIV_BUSY);
         REG_DIVCNT = DIV_64_32;
         REG_DIV_NUMER = numer;
         REG_DIV_DENOM_L = denom;
@@ -43,6 +51,7 @@ public:
 
     // Inicia división en punto fijo 20.12: (num << 12) / den
     static inline void startDivFixed20_12(int32_t numFixed, int32_t denFixed) {
+        while (REG_DIVCNT & DIV_BUSY);
         REG_DIVCNT = DIV_64_32;
         REG_DIV_NUMER = ((int64_t)numFixed) << 12;
         REG_DIV_DENOM_L = denFixed;
@@ -98,18 +107,21 @@ public:
 
     // Inicia raíz cuadrada de 32 bits
     static inline void startSqrt32(uint32_t param) {
+        while (REG_SQRTCNT & SQRT_BUSY);
         REG_SQRTCNT = SQRT_32;
         REG_SQRT_PARAM_L = param;
     }
 
     // Inicia raíz cuadrada de 64 bits
     static inline void startSqrt64(int64_t param) {
+        while (REG_SQRTCNT & SQRT_BUSY);
         REG_SQRTCNT = SQRT_64;
         REG_SQRT_PARAM = param;
     }
 
     // Inicia raíz cuadrada en punto fijo 20.12: sqrt((int64_t)valFixed << 12)
     static inline void startSqrtFixed20_12(int32_t valFixed) {
+        while (REG_SQRTCNT & SQRT_BUSY);
         REG_SQRTCNT = SQRT_64;
         REG_SQRT_PARAM = ((int64_t)valFixed) << 12;
     }
