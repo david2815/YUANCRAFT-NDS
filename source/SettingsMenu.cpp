@@ -1,3 +1,4 @@
+#include "Hardware.h"
 #include "SettingsMenu.h"
 #include "Options.h"
 #include "TextKeyboard.h"
@@ -8,24 +9,66 @@
 #include <string.h>
 
 static int s_selected = 0;          // 0 = back, 1 = controls, 2 = auto jump, 3 = debug large chest, 4 = chunk mode, 5 = default seed (random/custom), 6 = custom default seed, 7 = clockcompassinvupdate, 8 = particles, 9 = sound, 10 = inventoryMap
-static const int ROW_COUNT = 14;
-static const int COLUMNS = 32;      // ancho de la consola
+static inline int getRowCount() { return g_isDSi ? 15 : 14; }
+// Pop-up de confirmacion para opciones exclusivas de DSi en DS original
+static bool s_showingPopUp = false;
+static int s_pendingOption = -1;
+static int s_pendingValue = 0;
+
+static void drawPopUp() {
+    consoleClear();
+    iprintf("\x1b[31m================================\x1b[39m\n");
+    iprintf("  \x1b[33;1mADVERTENCIA: EXCLUSIVO DSi\x1b[39m\n");
+    iprintf("\x1b[31m================================\x1b[39m\n\n");
+    iprintf(" Este ajuste requiere la CPU a\n");
+    iprintf(" 133 MHz de una Nintendo DSi.\n\n");
+    iprintf(" En Nintendo DS clasica (67 MHz)\n");
+    iprintf(" causara caidas severas de FPS\n");
+    iprintf(" y riesgo de falta de memoria.\n\n");
+    iprintf(" Deseas aplicarlo de todos modos?\n\n");
+    iprintf(" \x1b[32m[A] Confirmar bajo tu riesgo\x1b[39m\n");
+    iprintf(" \x1b[31m[B] Cancelar\x1b[39m\n\n");
+    iprintf("\x1b[31m================================\x1b[39m\n");
+}
+
+// Devuelve la longitud visual de la cadena en columnas de consola (omitiendo codigos de escape ANSI)
+static int visualLength(const char* s) {
+    if (!s) return 0;
+    int len = 0;
+    bool inEsc = false;
+    for (; *s; s++) {
+        if (*s == '\x1b') inEsc = true;
+        else if (inEsc) {
+            if (*s == 'm') inEsc = false;
+        } else {
+            len++;
+        }
+    }
+    return len;
+}
 
 // "->  etiqueta                valor": flecha a la izquierda en la fila elegida, valor alineado a la derecha
 static void printRow(bool selected, const char* label, const char* value) {
-    char line[COLUMNS + 1];
-    memset(line, ' ', COLUMNS);
-    line[COLUMNS] = 0;
-    if (selected) { line[0] = '-'; line[1] = '>'; }
-    int labelLen = (int)strlen(label), valueLen = (int)strlen(value);
-    if (labelLen > COLUMNS - 4 - valueLen) labelLen = COLUMNS - 4 - valueLen;
-    memcpy(line + 3, label, labelLen);
-    memcpy(line + COLUMNS - valueLen, value, valueLen);
-    iprintf("%s\n", line);
+    const char* prefix = selected ? "-> " : "   ";
+    if (!label || label[0] == '\0') {
+        iprintf("%s%s\n", prefix, value ? value : "");
+        return;
+    }
+    int labelLen = (int)strlen(label);
+    int visValLen = visualLength(value ? value : "");
+    int totalVis = 3 + labelLen + visValLen;
+    if (totalVis < 32) {
+        int spaces = 32 - 3 - labelLen - visValLen;
+        if (spaces < 1) spaces = 1;
+        iprintf("%s%s%*s%s\n", prefix, label, spaces, "", value ? value : "");
+    } else {
+        // Si no cabe en una linea de 32 columnas, se imprime la etiqueta y debajo el valor con sangria
+        iprintf("%s%s:\n   %s\n", prefix, label, value ? value : "");
+    }
 }
 
 // Una fila por indice: el menu se desplaza como una lista (VISIBLE filas a la vez, la ventana baja o sube cuando la seleccion llega al borde)
-static const int VISIBLE = 8;
+static const int VISIBLE = 7;
 static int s_top = 0;
 
 static void printOption(int row) {
@@ -37,10 +80,27 @@ static void printOption(int row) {
         case 3: printRow(sel, "auto jump", Options::get().autoJump ? "on" : "off"); break;
         case 4: {
             static const char* const MODE_NAMES[3] = { "fast", "ds", "dsi" };
-            printRow(sel, "chunk mode", MODE_NAMES[Options::get().chunkMode <= 2 ? Options::get().chunkMode : 1]);
+            const int m = Options::get().chunkMode <= 2 ? Options::get().chunkMode : 1;
+            char valBuf[96];
+            if (!g_isDSi && m == 2) {
+                snprintf(valBuf, sizeof(valBuf), "dsi \x1b[31m[Exclusivo DSi]\x1b[39m");
+            } else {
+                snprintf(valBuf, sizeof(valBuf), "%s", MODE_NAMES[m]);
+            }
+            printRow(sel, "chunk mode", valBuf);
             break;
         }
-        case 5: printRow(sel, "render", Options::get().renderQuality == 2 ? "fast" : (Options::get().renderQuality == 1 ? "balanced" : "high")); break;
+        case 5: {
+            const int q = Options::get().renderQuality;
+            char valBuf[96];
+            if (!g_isDSi && q == 0) {
+                snprintf(valBuf, sizeof(valBuf), "high \x1b[33m[Riesgo: Caida FPS]\x1b[39m");
+            } else {
+                snprintf(valBuf, sizeof(valBuf), "%s", q == 2 ? "fast" : (q == 1 ? "balanced" : "high"));
+            }
+            printRow(sel, "render", valBuf);
+            break;
+        }
         case 6: printRow(sel, "default seed", Options::get().seedMode == 1 ? "custom" : "random"); break;
         case 7: {
             char seedText[16] = "";
@@ -54,6 +114,13 @@ static void printOption(int row) {
         case 11: printRow(sel, "sound", Options::get().sound ? "on" : "off"); break;
         case 12: printRow(sel, "inventoryMap", Options::get().inventoryMap ? "true" : "false"); break;
         case 13: printRow(sel, "fps counter", Options::get().showFps ? "on" : "off"); break;
+        case 14: {
+            if (g_isDSi) {
+                const bool fluid = Options::get().dsiPerformanceProfile == 1;
+                printRow(sel, "dsi perf profile", fluid ? "fluid (60fps)" : "distance (30fps)");
+            }
+            break;
+        }
     }
 }
 
@@ -61,12 +128,12 @@ static void draw() {
     if (s_selected < s_top) s_top = s_selected;
     if (s_selected >= s_top + VISIBLE) s_top = s_selected - VISIBLE + 1;
     if (s_top < 0) s_top = 0;
-    if (s_top > ROW_COUNT - VISIBLE) s_top = ROW_COUNT - VISIBLE;
+    if (s_top > getRowCount() - VISIBLE) s_top = getRowCount() - VISIBLE;
     consoleClear();
     iprintf("Options\n\n");
     iprintf("%s\n", s_top > 0 ? "                              ^" : "");
-    for (int r = s_top; r < s_top + VISIBLE && r < ROW_COUNT; r++) printOption(r);
-    iprintf("%s\n", s_top + VISIBLE < ROW_COUNT ? "                              v" : "");
+    for (int r = s_top; r < s_top + VISIBLE && r < getRowCount(); r++) printOption(r);
+    iprintf("%s\n", s_top + VISIBLE < getRowCount() ? "                              v" : "");
 }
 
 // ---- Submenu "controls": modo (perfil), reset del perfil y un boton por accion ----
@@ -194,26 +261,81 @@ void SettingsMenu::open() {
     s_selected = 0;
     s_top = 0;
     s_view = 0;
+    s_showingPopUp = false;
     cListening = false;
     consoleDemoInit();   // consola de la pantalla de abajo
     draw();
 }
 
 bool SettingsMenu::update(u32 keysDown) {
+    if (keysDown & KEY_TOUCH) {
+        touchPosition touch;
+        touchRead(&touch);
+        if (s_showingPopUp) {
+            if (touch.py >= 120 && touch.py <= 160) {
+                // Confirmar
+                Sound::uiClick();
+                if (s_pendingOption == 4) Options::get().chunkMode = (unsigned char)s_pendingValue;
+                else if (s_pendingOption == 5) Options::get().renderQuality = (unsigned char)s_pendingValue;
+                Options::save();
+                s_showingPopUp = false;
+                consoleDemoInit();
+                draw();
+                return false;
+            } else if (touch.py > 160) {
+                // Cancelar
+                Sound::uiClick();
+                s_showingPopUp = false;
+                consoleDemoInit();
+                draw();
+                return false;
+            }
+        } else if (s_view == 0) {
+            // Tocar en la zona superior (y < 32) equivale al boton back
+            if (touch.py < 32) {
+                Sound::uiClick();
+                return true;
+            }
+        }
+    }
+
+    if (s_showingPopUp) {
+        if (keysDown & KEY_A) {
+            Sound::uiClick();
+            if (s_pendingOption == 4) Options::get().chunkMode = (unsigned char)s_pendingValue;
+            else if (s_pendingOption == 5) Options::get().renderQuality = (unsigned char)s_pendingValue;
+            Options::save();
+            s_showingPopUp = false;
+            consoleDemoInit();
+            draw();
+            return false;
+        }
+        if (keysDown & KEY_B) {
+            Sound::uiClick();
+            s_showingPopUp = false;
+            consoleDemoInit();
+            draw();
+            return false;
+        }
+        return false;
+    }
+
     if (keysDown & (KEY_A | KEY_B | KEY_LEFT | KEY_RIGHT)) Sound::uiClick();   // cada cambio de opcion, submenu o volver
 
     if (s_view == 1) {
-        if (updateControls(keysDown)) { s_view = 0; consoleDemoInit(); draw(); }
+        if (updateControls(keysDown)) { s_view = 0;
+    s_showingPopUp = false; consoleDemoInit(); draw(); }
         return false;
     }
     if (s_view == 2) {
-        if (updateDebug(keysDown)) { s_view = 0; consoleDemoInit(); draw(); }
+        if (updateDebug(keysDown)) { s_view = 0;
+    s_showingPopUp = false; consoleDemoInit(); draw(); }
         return false;
     }
     if (keysDown & KEY_B) return true;
 
-    if (keysDown & KEY_UP)   { s_selected = (s_selected + ROW_COUNT - 1) % ROW_COUNT; draw(); }
-    if (keysDown & KEY_DOWN) { s_selected = (s_selected + 1) % ROW_COUNT; draw(); }
+    if (keysDown & KEY_UP)   { s_selected = (s_selected + getRowCount() - 1) % getRowCount(); draw(); }
+    if (keysDown & KEY_DOWN) { s_selected = (s_selected + 1) % getRowCount(); draw(); }
 
     if (keysDown & (KEY_A | KEY_LEFT | KEY_RIGHT)) {
         if (s_selected == 0) {
@@ -237,7 +359,17 @@ bool SettingsMenu::update(u32 keysDown) {
             Options::save();
             draw();
         } else if (s_selected == 5) {
-            { int q = Options::get().renderQuality; q = (keysDown & KEY_LEFT) ? (q + 2) % 3 : (q + 1) % 3; Options::get().renderQuality = (unsigned char)q; }
+            int q = Options::get().renderQuality;
+            q = (keysDown & KEY_LEFT) ? (q + 2) % 3 : (q + 1) % 3;
+            if (!g_isDSi && q == 0) {
+                // Advertencia para 'high' en DS clasica
+                s_showingPopUp = true;
+                s_pendingOption = 5;
+                s_pendingValue = 0;
+                drawPopUp();
+                return false;
+            }
+            Options::get().renderQuality = (unsigned char)q;
             Options::save();
             draw();
         } else if (s_selected == 12) {
@@ -272,13 +404,30 @@ bool SettingsMenu::update(u32 keysDown) {
                 consoleDemoInit();   // de vuelta a la lista
                 draw();
             }
-        } else {
-            // fast -> ds -> dsi (dsi solo en una DSi); con IZQUIERDA se retrocede. Vale desde el proximo mundo que se abra.
-            const int top = isDSiMode() ? 2 : 1;
+        } else if (s_selected == 14 && g_isDSi) {
+            const int next = Options::get().dsiPerformanceProfile == 1 ? 0 : 1;
+            Options::get().dsiPerformanceProfile = (unsigned char)next;
+            if (next == 1) {
+                // Perfil Fluidez (60 FPS): reduce la distancia de dibujado al minimo indispensable
+                Options::get().chunkMode = 0; // fast (3x3)
+            } else {
+                // Perfil Distancia (30 FPS): expande la distancia de renderizado al punto optimo
+                Options::get().chunkMode = 2; // dsi (7x7)
+            }
+            Options::save();
+            draw();
+        } else if (s_selected == 4) {
+            // fast (0) -> ds (1) -> dsi (2)
             int m = Options::get().chunkMode;
-            if (m > top) m = top;
-            if (keysDown & KEY_LEFT) m = (m + top) % (top + 1);
-            else                     m = (m + 1) % (top + 1);
+            m = (keysDown & KEY_LEFT) ? (m + 2) % 3 : (m + 1) % 3;
+            if (!g_isDSi && m == 2) {
+                // Advertencia y Pop-up en DS original
+                s_showingPopUp = true;
+                s_pendingOption = 4;
+                s_pendingValue = 2;
+                drawPopUp();
+                return false;
+            }
             Options::get().chunkMode = (unsigned char)m;
             Options::save();
             draw();

@@ -19,7 +19,7 @@ public:
     // Llamar cada frame: genera columnas pendientes de todos los
     // chunks activos, y asegura que el chunk del jugador + sus 8
     // vecinos existan
-    void update(float playerX, float playerZ);
+    void update(float playerX, float playerZ, float lookDirX = 0.0f, float lookDirZ = 0.0f);
     void refreshNeighborFace(float worldX, float worldY, float worldZ) const;
 
     // Retorna el chunk que contiene la posición de mundo dada, o
@@ -31,6 +31,7 @@ public:
 
     Chunk* getCenterChunk() const { return chunks[centerIndex]; }
     unsigned int getSeed() const { return seed; }
+    int countModifiedChunks() const;
     int saveModifiedChunks() const;
     bool isBlockPresentAt(float x, float y, float z) const;
     void forceFullRecalculation() const;

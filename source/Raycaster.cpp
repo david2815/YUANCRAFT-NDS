@@ -1,3 +1,4 @@
+#include "HwMath.h"
 #include "Raycaster.h"
 #include "ChunkManager.h"
 #include "Chunk.h"
@@ -135,9 +136,9 @@ RaycastHit Raycaster::cast(const ChunkManager& chunkManager,
         float remainZ = endZ - pz;
 
         float tX = 999.0f, tY = 999.0f, tZ = 999.0f;
-        if (activeX) tX = (boundX - px) / remainX;
-        if (activeY) tY = (boundY - (py + Y_ALIGN_OFFSET)) / remainY;
-        if (activeZ) tZ = (boundZ - pz) / remainZ;
+        if (activeX) tX = HwMath::divf(boundX - px, remainX);
+        if (activeY) tY = HwMath::divf(boundY - (py + Y_ALIGN_OFFSET), remainY);
+        if (activeZ) tZ = HwMath::divf(boundZ - pz, remainZ);
 
         int faceCode;
 

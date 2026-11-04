@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "PauseScreen.h"
 #include <nds.h>
 #include "pauseMenu.h"
@@ -29,5 +30,49 @@ PauseScreen::Button PauseScreen::touched(int touchX, int touchY) {
     if (touchY >= 68  && touchY <= 93)  return BTN_OPTIONS;
     if (touchY >= 98  && touchY <= 123) return BTN_SAVE;
     if (touchY >= 128 && touchY <= 153) return BTN_QUIT;
+    return BTN_NONE;
+}
+void PauseScreen::showSavingProgress(int percent, int current, int total) {
+    consoleClear();
+    iprintf("\x1b[36m================================\x1b[39m\n");
+    iprintf("   \x1b[32;1mGUARDADO SEGURO A PRUEBA\x1b[39m\n");
+    iprintf("       \x1b[32;1mDE FALLOS EN SD\x1b[39m\n");
+    iprintf("\x1b[36m================================\x1b[39m\n\n");
+    iprintf(" \x1b[31;1mNO apagues la consola\x1b[39m ni\n");
+    iprintf(" retires la tarjeta SD.\n\n");
+    iprintf(" Volcado RLE/LZSS asincrono:\n\n");
+
+    char bar[21];
+    int filled = (percent * 20) / 100;
+    if (filled > 20) filled = 20;
+    for (int i = 0; i < 20; i++) bar[i] = (i < filled) ? '=' : ' ';
+    bar[20] = '\0';
+
+    iprintf(" [%s] %3d%%\n\n", bar, percent);
+    iprintf(" Chunks volcados: %d / %d\n\n", current, total);
+    iprintf("\x1b[33m [Entradas y botones bloqueados]\x1b[39m\n");
+}
+
+void PauseScreen::showSaveComplete() {
+    consoleDemoInit();
+    consoleClear();
+    iprintf("\x1b[32m================================\x1b[39m\n");
+    iprintf("    \x1b[32;1mGUARDADO EXITOSO (SUCCESS)\x1b[39m\n");
+    iprintf("\x1b[32m================================\x1b[39m\n\n");
+    iprintf(" Todos los datos del mundo se\n");
+    iprintf(" han volcado a la SD con exito.\n\n");
+    iprintf(" Deseas continuar o salir?\n\n");
+    iprintf(" \x1b[36m------------------------------\x1b[39m\n");
+    iprintf("  \x1b[37;1m[A] Continuar Partida\x1b[39m\n");
+    iprintf(" \x1b[36m------------------------------\x1b[39m\n");
+    iprintf("  \x1b[37;1m[B] Salir al Menu Principal\x1b[39m\n");
+    iprintf(" \x1b[36m------------------------------\x1b[39m\n\n");
+    iprintf(" Toca la opcion o presiona A / B\n");
+}
+
+PauseScreen::Button PauseScreen::touchedSaveComplete(int touchX, int touchY) {
+    if (touchX < 20 || touchX > 236) return BTN_NONE;
+    if (touchY >= 80 && touchY <= 120) return BTN_CONTINUE;
+    if (touchY >= 125 && touchY <= 165) return BTN_QUIT;
     return BTN_NONE;
 }

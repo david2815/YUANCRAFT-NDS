@@ -1,3 +1,4 @@
+#include "AsyncSaveManager.h"
 #include "Liquid.h"
 #include "Redstone.h"
 #include "PartialBlocks.h"
@@ -145,7 +146,7 @@ void ChunkManager::flushOnePendingSave() {
     Chunk* toSave = pendingSaveChunks[pendingSaveCount];
     char oldFilename[96];
     toSave->getSaveFilename(oldFilename);
-    toSave->saveToFile(oldFilename);
+    toSave->saveToFileAsync(oldFilename);
     releaseChunk(toSave);
 }
 
@@ -244,7 +245,7 @@ int ChunkManager::findOrCreateSlot(int cx, int cz, const int* protectX, const in
     return farthestIndex;
 }
 
-void ChunkManager::update(float playerX, float playerZ) {
+void ChunkManager::update(float playerX, float playerZ, float lookDirX, float lookDirZ) {
     auto needsHeavyWork = [this](int i) {
 	if (awaitingLoad[i]) return false;
         return !chunks[i]->isGenerationComplete() || chunks[i]->isCacheRecalcPending() || chunks[i]->isInitialSkyLightPending() || chunks[i]->isEmitterReseedPending();
@@ -267,10 +268,13 @@ void ChunkManager::update(float playerX, float playerZ) {
         if (slotUsed[i]) {
             char filename[96];
             Chunk::getSaveFilenameFor(chunkPosX[i], chunkPosZ[i], seed, filename);
-            if (chunks[i]->loadFromFile(filename)) {   // etapa 1: abrir y leer. Bioma y colores se calculan despues, repartidos (abajo)
-                loadingBiome[i] = true;                 // awaitingLoad sigue en true hasta que termine
+            if (chunks[i]->loadFromFile(filename)) {
+                // Carga instantanea: descompresion y volcado directo completados
+                loadingBiome[i] = false;
+                awaitingLoad[i] = false;
+                chunks[i]->beginFullFaceCacheRecalc();
             } else {
-                awaitingLoad[i] = false;                // sin archivo: el chunk se genera de la semilla
+                awaitingLoad[i] = false;
             }
         }
     }
@@ -279,15 +283,20 @@ void ChunkManager::update(float playerX, float playerZ) {
         flushOnePendingSave();
     }
 
-    // Streaming asíncrono dinámico: en DSi (133 MHz, 16 MB) se procesan hasta 5 chunks;
-    // en DS tradicional (67 MHz, 4 MB) se restringe estrictamente a 2 chunks para streaming suave sin congelar la SD.
-    const int MAX_CONCURRENT_HEAVY_CHUNKS = Hardware::isDSi() ? 5 : 2;
+    // Procesar cola de guardado asíncrono continua en segundo plano
+    AsyncSaveManager::processQueue();
+
+    // DSi (133 MHz): ráfaga (burst generation) de hasta 8 chunks simultáneos
+    // DS original (67 MHz): restrictivo a 2 chunks para streaming suave a 30 FPS
+    const int MAX_CONCURRENT_HEAVY_CHUNKS = Hardware::getMaxConcurrentHeavyChunks();
+
+    const bool isDS = !Hardware::isDSi();
+    const bool slowFrame = Governor::isSlowFrame();
 
     int processedHeavy = 0;
     Chunk::beginHeavyFrame();
     Caves::beginFrame();
 
-    // Un chunk recien leido del disco termina su bioma/colores en varios cuadros (el mas cercano primero); los demas esperan su turno
     if (!Governor::skipHeavy()) {
         const int ccx = centerIndex >= 0 ? chunkPosX[centerIndex] : 0;
         const int ccz = centerIndex >= 0 ? chunkPosZ[centerIndex] : 0;
@@ -305,28 +314,54 @@ void ChunkManager::update(float playerX, float playerZ) {
         }
     }
 
-    // Primero los chunks más cercanos al jugador: al llegar a terreno nuevo, el de debajo de los pies se completa antes que los del borde
-    // de la ventana (antes se rotaba entre todos por igual y con 25 chunks el de los pies tardaba mucho)
+    // Cola en espiral ascendente priorizando el Frustum frontal en punto fijo 8.8
     int heavyOrder[CAP_CHUNKS], heavyKey[CAP_CHUNKS], heavyCount = 0;
     {
         const int ccx = centerIndex >= 0 ? chunkPosX[centerIndex] : 0;
         const int ccz = centerIndex >= 0 ? chunkPosZ[centerIndex] : 0;
+
+        const int dirX8 = (int)(lookDirX * 256.0f);
+        const int dirZ8 = (int)(lookDirZ * 256.0f);
+        const bool hasDir = (dirX8 != 0 || dirZ8 != 0);
+
         for (int i = 0; i < maxChunks; i++) {
             if (!slotUsed[i] || !needsHeavyWork(i)) continue;
-            const int ddx = chunkPosX[i] - ccx, ddz = chunkPosZ[i] - ccz;
-            const int key = ddx * ddx + ddz * ddz;
+            const int ddx = chunkPosX[i] - ccx;
+            const int ddz = chunkPosZ[i] - ccz;
+            const int distSq = ddx * ddx + ddz * ddz;
+
+            int key = distSq * 512;
+            if (hasDir && distSq > 0) {
+                int dot = ddx * dirX8 + ddz * dirZ8;
+                key -= (dot * 2);
+            }
+
             int p = heavyCount++;
-            while (p > 0 && heavyKey[p - 1] > key) { heavyKey[p] = heavyKey[p - 1]; heavyOrder[p] = heavyOrder[p - 1]; p--; }
-            heavyKey[p] = key; heavyOrder[p] = i;
+            while (p > 0 && heavyKey[p - 1] > key) {
+                heavyKey[p] = heavyKey[p - 1];
+                heavyOrder[p] = heavyOrder[p - 1];
+                p--;
+            }
+            heavyKey[p] = key;
+            heavyOrder[p] = i;
         }
     }
 
     for (int k = 0; k < heavyCount; k++) {
         int i = heavyOrder[k];
-        if (processedHeavy >= MAX_CONCURRENT_HEAVY_CHUNKS || Governor::skipHeavy()) continue;   // Governor: tras un cuadro lento se salta el trabajo pesado
+        if (processedHeavy >= MAX_CONCURRENT_HEAVY_CHUNKS || Governor::skipHeavy()) continue;
         if (!Chunk::heavyBudgetLeft()) break;
 
-        chunks[i]->update(this);
+        const int ccx = centerIndex >= 0 ? chunkPosX[centerIndex] : 0;
+        const int ccz = centerIndex >= 0 ? chunkPosZ[centerIndex] : 0;
+        const int ddx = chunkPosX[i] - ccx;
+        const int ddz = chunkPosZ[i] - ccz;
+        const int distSq = ddx * ddx + ddz * ddz;
+
+        // Perfil DS (67 MHz): Si el cuadro supera 25ms, pausar estructuras secundarias en chunks lejanos
+        bool pauseSecondary = isDS && slowFrame && (distSq > 4);
+
+        chunks[i]->update(this, pauseSecondary);
         processedHeavy++;
 
         bool isCompleteNow = chunks[i]->isGenerationComplete();
@@ -1052,6 +1087,14 @@ void ChunkManager::removeBlockLight(float worldX, float worldY, float worldZ) co
     floodFillBlockLight(relightSeeds, relightCount);
 }
 
+int ChunkManager::countModifiedChunks() const {
+    int count = 0;
+    for (int i = 0; i < maxChunks; i++) {
+        if (slotUsed[i] && chunks[i] && chunks[i]->isModified()) count++;
+    }
+    return count;
+}
+
 int ChunkManager::saveModifiedChunks() const {
     int savedCount = 0;
 
@@ -1062,7 +1105,7 @@ int ChunkManager::saveModifiedChunks() const {
         char filename[96]; // antes 32
         chunks[i]->getSaveFilename(filename);
 
-        if (chunks[i]->saveToFile(filename)) {
+        if (chunks[i]->saveToFileAsync(filename)) {
             savedCount++;
         }
     }

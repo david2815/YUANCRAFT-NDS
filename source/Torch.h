@@ -1,3 +1,4 @@
+#include "HwMath.h"
 #ifndef TORCH_H
 #define TORCH_H
 
@@ -97,7 +98,7 @@ inline bool intermediate(const float a[3], const float b[3], int axis, float v, 
     float d0 = b[0] - a[0], d1 = b[1] - a[1], d2 = b[2] - a[2];
     float d = (axis == 0) ? d0 : (axis == 1 ? d1 : d2);
     if (d * d < 1.0E-7f) return false;
-    float t = (v - a[axis]) / d;
+    float t = HwMath::divf(v - a[axis], d);
     if (t < 0.0f || t > 1.0f) return false;
     out[0] = a[0] + d0 * t; out[1] = a[1] + d1 * t; out[2] = a[2] + d2 * t;
     return true;

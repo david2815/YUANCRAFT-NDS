@@ -1,3 +1,4 @@
+#include "HwMath.h"
 #ifndef PLAYER_H
 #define PLAYER_H
 
@@ -21,7 +22,7 @@ public:
     float thirdPersonDistance(const ChunkManager& chunkManager, float eyeX, float eyeY, float eyeZ) const;
     float getBobStrengthDebug() const { return bobStrength; }
 
-    void physicsTick(u32 keysHeld, const ChunkManager& chunkManager, bool autoJumpEnabled);
+    ITCM_CODE void physicsTick(u32 keysHeld, const ChunkManager& chunkManager, bool autoJumpEnabled);
 
     void getViewBob(float partialTick, float& bobX, float& bobY, float& bobRoll) const;
     float getDistanceWalked() const { return currentTickDistance; }
@@ -117,7 +118,7 @@ private:
     float buttonLookSpeedH = 0.0f;
     float buttonLookSpeedV = 0.0f;
 
-    bool collidesAt(const ChunkManager& chunkManager, float testX, float testY, float testZ) const;
+    ITCM_CODE bool collidesAt(const ChunkManager& chunkManager, float testX, float testY, float testZ) const;
     bool tryStepUp(const ChunkManager& chunkManager, float dx, float dz);
 };
 

@@ -1,3 +1,4 @@
+#include "AsyncSaveManager.h"
 #include "Chunk.h"
 #include "ChunkCompression.h"
 #include "Options.h"
@@ -340,7 +341,7 @@ void Chunk::continueDisplayListRebuild(const ChunkManager* manager, int* rebuild
                 break;
             }
             if (!scratch.overflowed()) {
-                memcpy(buf, s_dlScratch, (1 + bodyWords) * sizeof(u32)); // la palabra 0 ya trae el tamaño
+                dmaCopyWords(3, s_dlScratch, buf, (1 + bodyWords) * sizeof(u32));
                 flushList(buf);
                 dstVerts[band] = (int)scratch.getVertexCount();
             } else {
@@ -1188,7 +1189,7 @@ void Chunk::generateSprings(const ChunkManager* manager) {
     }
 }
 
-void Chunk::update(const ChunkManager* manager) {
+void Chunk::update(const ChunkManager* manager, bool pauseSecondaryStructures) {
     if (generationComplete) {
         { PROF(Prof::FACES); continueFaceCacheRecalc(manager); }
         { PROF(Prof::SKY);   continueInitialSkyLight(manager); continueEmitterReseed(manager); }
@@ -1231,20 +1232,21 @@ void Chunk::update(const ChunkManager* manager) {
 
     PROF(Prof::GEN_STRUCT);
     if (!cavesDone) {
+        if (pauseSecondaryStructures) return; // Pausa cuevas en chunks lejanos para mantener 30 FPS en DS
         PROFSTEP("caves");
         if (generateCaves(manager)) cavesDone = true;
-        return; // un paso por cuadro; árboles, menas y cactus empiezan cuando terminan las cuevas
+        return;
     }
     s_structureGenActive = true;
-    // Terreno terminado — repartimos las estructuras en varios frames
-    // separados, en vez de las 3 juntas de golpe
     switch (structureGenPhase) {
         case 0: {
+            if (pauseSecondaryStructures) { s_structureGenActive = false; return; }
             PROFSTEP("lakes");
             if (generateLakes(manager)) { structureGenPhase = 1; structureGenXi = 0; structureGenZi = 0; }
             break;
         }
         case 1: {
+            if (pauseSecondaryStructures) { s_structureGenActive = false; return; }
             PROFSTEP("trees");
             bool done;
             generateTrees(manager, structureGenXi, structureGenZi, structureGenXi, structureGenZi, done);
@@ -1500,7 +1502,7 @@ bool Chunk::buildLodList(bool coarse) {
     if (b.overflowed() || words == 0) { lodDirty = false; lodCoarse = coarse; return words == 0; }   // vacia: no hay nada que dibujar
     u32* buf = new (std::nothrow) u32[1 + words];
     if (!buf) return false;
-    memcpy(buf, s_dlScratch, (1 + words) * sizeof(u32));
+    dmaCopyWords(3, s_dlScratch, buf, (1 + words) * sizeof(u32));
     flushList(buf);
     dlLod = buf;
     dlLodVerts = (int)b.getVertexCount();
@@ -3293,6 +3295,24 @@ int Chunk::getHighestSolidY(int xi, int zi) const {
     return -1;
 }
 
+bool Chunk::saveToFileAsync(const char* path) const {
+    if (!generationComplete) return false;
+    static u8 s_rawSaveBuf[sizeof(blocks) + sizeof(liquidMeta)];
+    static u8 s_compSaveBuf[sizeof(s_rawSaveBuf) + 256];
+
+    const size_t rawSize = sizeof(blocks) + sizeof(liquidMeta);
+    memcpy(s_rawSaveBuf, blocks, sizeof(blocks));
+    memcpy(s_rawSaveBuf + sizeof(blocks), liquidMeta, sizeof(liquidMeta));
+
+    int compSize = ChunkCompression::compressLZ10(s_rawSaveBuf, (int)rawSize, s_compSaveBuf, (int)sizeof(s_compSaveBuf));
+    if (compSize > 0 && compSize < (int)rawSize) {
+        if (AsyncSaveManager::enqueueSave(path, s_compSaveBuf, compSize)) {
+            return true;
+        }
+    }
+    return saveToFile(path);
+}
+
 bool Chunk::saveToFile(const char* path) const {
     if (!generationComplete) return false;   // nunca escribir un chunk incompleto
     FILE* file = fopen(path, "wb");
@@ -3392,8 +3412,16 @@ bool Chunk::loadFromFile(const char* path) {
         if (!any) { remove(path); return false; }
     }
 
-    loadStaging = true;      // el bioma y los colores se calculan despues, repartidos en varios cuadros
-    loadBiomeIdx = 0;
+    // CARGA INSTANTANEA (Volcado Directo RLE/LZSS):
+    // Bypass del pipeline repartido para carga inmediata desde disco
+    rebuildAllOccupancy();
+    if (s_dimension == 0) {
+        computeBiomeData();
+    }
+    loadStaging = false;
+    generationComplete = true;
+    beginFullFaceCacheRecalc();
+    markDisplayListDirty();
     return true;
 }
 
@@ -3544,8 +3572,7 @@ BlockType Chunk::getBlockType(int xi, int yi, int zi) const {
     if (xi < 0 || xi >= SIZE_X) return BlockType::AIR;
     if (yi < 0 || yi >= SIZE_Y) return BlockType::AIR;
     if (zi < 0 || zi >= SIZE_Z) return BlockType::AIR;
-    // Lectura directa desde el formato RLE en RAM activa para maximo rendimiento
-    return rleCols[xi][zi].get(yi);
+    return blocks[xi][yi][zi];
 }
 
 void Chunk::beginFullFaceCacheRecalc() {
@@ -3768,15 +3795,19 @@ void Chunk::generateSpruceTree1(const ChunkManager* manager, int xi, int zi, int
                 float worldZ = gridToWorldZ(nlZi);
 
                 if (nlXi >= 0 && nlXi < SIZE_X && nlZi >= 0 && nlZi < SIZE_Z) {
-                    if (worldLy >= 0 && worldLy < SIZE_Y && blocks[nlXi][worldLy][nlZi] == BlockType::AIR) {
-                        setBlockDirect(nlXi, worldLy, nlZi, BlockType::SPRUCE_LEAVES, manager);
+                    if (worldLy >= 0 && worldLy < SIZE_Y) {
+                        BlockType cur = blocks[nlXi][worldLy][nlZi];
+                        if (cur == BlockType::AIR || cur == BlockType::SNOW_LAYER || cur == BlockType::TALLGRASS) {
+                            setBlockDirect(nlXi, worldLy, nlZi, BlockType::SPRUCE_LEAVES, manager);
+                        }
                     }
                 } else if (manager) {
                     Chunk* neighbor = manager->getChunkAt(worldX, worldZ);
                     if (neighbor) {
                         int nXi, nYi, nZi;
                         if (neighbor->worldToGrid(worldX, worldY, worldZ, nXi, nYi, nZi)) {
-                            if (neighbor->getBlockType(nXi, nYi, nZi) == BlockType::AIR) {
+                            BlockType cur = neighbor->getBlockType(nXi, nYi, nZi);
+                            if (cur == BlockType::AIR || cur == BlockType::SNOW_LAYER || cur == BlockType::TALLGRASS) {
                                 neighbor->setBlockDirect(nXi, nYi, nZi, BlockType::SPRUCE_LEAVES, manager);
                             }
                         }
@@ -3820,15 +3851,19 @@ void Chunk::generateSpruceTree2(const ChunkManager* manager, int xi, int zi, int
                 float worldZ = gridToWorldZ(nlZi);
 
                 if (nlXi >= 0 && nlXi < SIZE_X && nlZi >= 0 && nlZi < SIZE_Z) {
-                    if (worldLy >= 0 && worldLy < SIZE_Y && blocks[nlXi][worldLy][nlZi] == BlockType::AIR) {
-                        setBlockDirect(nlXi, worldLy, nlZi, BlockType::SPRUCE_LEAVES, manager);
+                    if (worldLy >= 0 && worldLy < SIZE_Y) {
+                        BlockType cur = blocks[nlXi][worldLy][nlZi];
+                        if (cur == BlockType::AIR || cur == BlockType::SNOW_LAYER || cur == BlockType::TALLGRASS) {
+                            setBlockDirect(nlXi, worldLy, nlZi, BlockType::SPRUCE_LEAVES, manager);
+                        }
                     }
                 } else if (manager) {
                     Chunk* neighbor = manager->getChunkAt(worldX, worldZ);
                     if (neighbor) {
                         int nXi, nYi, nZi;
                         if (neighbor->worldToGrid(worldX, worldY, worldZ, nXi, nYi, nZi)) {
-                            if (neighbor->getBlockType(nXi, nYi, nZi) == BlockType::AIR) {
+                            BlockType cur = neighbor->getBlockType(nXi, nYi, nZi);
+                            if (cur == BlockType::AIR || cur == BlockType::SNOW_LAYER || cur == BlockType::TALLGRASS) {
                                 neighbor->setBlockDirect(nXi, nYi, nZi, BlockType::SPRUCE_LEAVES, manager);
                             }
                         }
@@ -3983,7 +4018,8 @@ static void bigTreePlaceSphereLayer(Chunk* self, const ChunkManager* manager, in
             pos[axis] = center[axis];
 
             BlockType existing = self->bigTreeGetBlock(manager, pos[0], pos[1], pos[2]);
-            if (existing != BlockType::AIR && existing != BlockType::OAK_LEAVES) continue;
+            if (existing != BlockType::AIR && existing != BlockType::OAK_LEAVES &&
+                existing != BlockType::SNOW_LAYER && existing != BlockType::TALLGRASS) continue;
 
             self->bigTreeSetBlock(manager, pos[0], pos[1], pos[2], blockType);
         }
@@ -4146,8 +4182,6 @@ bool Chunk::generateBigOakTree(const ChunkManager* manager, int xi, int zi, int 
 }
 
 void Chunk::generateTrees(const ChunkManager* manager, int startXi, int startZi, int& outXi, int& outZi, bool& done) {
-    const int BATCH_SIZE = 6;
-
     int processed = 0;
     int xi = startXi;
     int zi = startZi;
@@ -4192,7 +4226,7 @@ void Chunk::generateTrees(const ChunkManager* manager, int startXi, int startZi,
 
                 if (!skip) {
                     int highestY = getHighestSolidY(xi, zi);
-                    if (highestY >= 0 && blocks[xi][highestY][zi] == BlockType::GRASS) {
+                    if (highestY >= 0 && (blocks[xi][highestY][zi] == BlockType::GRASS || blocks[xi][highestY][zi] == BlockType::DIRT)) {
                         int trunkHeight = 4 + (int)(Noise::hashInt(globalXi, globalZi, 12) % 3);
 
                         bool clearAbove = true;
@@ -4266,15 +4300,19 @@ void Chunk::generateTrees(const ChunkManager* manager, int startXi, int startZi,
                                             float worldZ = gridToWorldZ(nlZi);
 
                                             if (nlXi >= 0 && nlXi < SIZE_X && nlZi >= 0 && nlZi < SIZE_Z) {
-                                                if (ly >= 0 && ly < SIZE_Y && blocks[nlXi][ly][nlZi] == BlockType::AIR) {
-                                                    setBlockDirect(nlXi, ly, nlZi, leafType, manager);
+                                                if (ly >= 0 && ly < SIZE_Y) {
+                                                    BlockType cur = blocks[nlXi][ly][nlZi];
+                                                    if (cur == BlockType::AIR || cur == BlockType::SNOW_LAYER || cur == BlockType::TALLGRASS) {
+                                                        setBlockDirect(nlXi, ly, nlZi, leafType, manager);
+                                                    }
                                                 }
                                             } else if (manager) {
                                                 Chunk* neighbor = manager->getChunkAt(worldX, worldZ);
                                                 if (neighbor) {
                                                     int nXi, nYi, nZi;
                                                     if (neighbor->worldToGrid(worldX, worldY, worldZ, nXi, nYi, nZi)) {
-                                                        if (neighbor->getBlockType(nXi, nYi, nZi) == BlockType::AIR) {
+                                                        BlockType cur = neighbor->getBlockType(nXi, nYi, nZi);
+                                                        if (cur == BlockType::AIR || cur == BlockType::SNOW_LAYER || cur == BlockType::TALLGRASS) {
                                                             neighbor->setBlockDirect(nXi, nYi, nZi, leafType, manager);
                                                         }
                                                     }
@@ -4301,7 +4339,7 @@ void Chunk::generateTrees(const ChunkManager* manager, int startXi, int startZi,
             zi++;
             processed++;
             s_heavyDidOne = true;
-            if (processed >= BATCH_SIZE || !heavyBudgetLeft()) {
+            if (!heavyBudgetLeft()) {
                 outXi = xi;
                 outZi = zi;
                 done = false;
@@ -4461,7 +4499,7 @@ void Chunk::generateOres(const ChunkManager* manager, int startAttempt, int& out
     };
     const int UNITS_PER_SRC = 5 + 5 + 1 + 1 + 2 + 1 + 5 + 5 + 1;   // suma de count
     const int UNITS = 9 * UNITS_PER_SRC;               // 9 chunks de origen
-    const int MAX_VEINS_PER_CALL = 1;          // vetas con trabajo real por llamada
+    const int MAX_VEINS_PER_CALL = 6;          // vetas con trabajo real por llamada dentro del presupuesto
 
     int worked = 0;
     int unit = startAttempt;
@@ -4515,8 +4553,6 @@ void Chunk::generateOres(const ChunkManager* manager, int startAttempt, int& out
 }
 
 void Chunk::generateCactus(const ChunkManager* manager, int startXi, int startZi, int& outXi, int& outZi, bool& done) {
-    const int BATCH_SIZE = 8;
-
     int processed = 0;
     int xi = startXi, zi = startZi;
 
@@ -4577,7 +4613,7 @@ void Chunk::generateCactus(const ChunkManager* manager, int startXi, int startZi
             zi++;
             processed++;
             s_heavyDidOne = true;
-            if (processed >= BATCH_SIZE || !heavyBudgetLeft()) {
+            if (!heavyBudgetLeft()) {
                 outXi = xi;
                 outZi = zi;
                 done = false;
@@ -4751,31 +4787,20 @@ void Chunk::syncBlocksFromRLE() {
     }
 }
 
-void Chunk::rebuildColumnOccupancy(int xi, int zi) {
+ITCM_CODE void Chunk::rebuildColumnOccupancy(int xi, int zi) {
     occupancy[xi][zi][0] = 0;
     occupancy[xi][zi][1] = 0;
     occupancy[xi][zi][2] = 0;
     occupancy[xi][zi][3] = 0;
 
-    // Aceleracion RLE: iteramos los tramos continuos directamente O(runs)
-    // en lugar de 128 iteraciones individuales. Zonas continuas de aire o piedra
-    // se procesan de un solo paso.
-    const VoxelColumnRLE& col = rleCols[xi][zi];
-    int y = 0;
-    for (int r = 0; r < col.runCount; r++) {
-        BlockType t = col.runs[r].type;
-        int len = col.runs[r].length;
-        if (isNormalCube(t)) {
-            for (int k = 0; k < len; k++) {
-                int yi = y + k;
-                occupancy[xi][zi][yi / 32] |= (1u << (yi % 32));
-            }
+    for (int yi = 0; yi < SIZE_Y; yi++) {
+        if (isSolidGrid(xi, yi, zi)) {
+            occupancy[xi][zi][yi >> 5] |= (1u << (yi & 31));
         }
-        y += len;
     }
 }
 
-void Chunk::computeColumnFacesBitwise(int xi, int zi, const ChunkManager* manager) {
+ITCM_CODE void Chunk::computeColumnFacesBitwise(int xi, int zi, const ChunkManager* manager) {
     unsigned int* occ = occupancy[xi][zi];
 
     unsigned int aboveMask[4], belowMask[4];

@@ -10,6 +10,8 @@ namespace Governor {
     void onFrameEnd(unsigned int frameTicks);   // al terminar cada cuadro, con los ticks del temporizador (33514 por milisegundo)
     bool skipHeavy();                       // true: en este cuadro no se hace trabajo pesado de generación ni se reconstruyen listas de dibujo
     int budgetPercent();                    // 100 normal; 50 si el cuadro anterior pasó de 20 ms (se aplica a los presupuestos de Chunk.cpp)
+    unsigned int getLastFrameMs();          // milisegundos que tardó el cuadro anterior
+    bool isSlowFrame();                     // true si superó 25ms (umbral de 30 FPS en DS a 67 MHz)
 }
 
 #endif

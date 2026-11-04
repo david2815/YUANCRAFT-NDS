@@ -19,7 +19,7 @@ public:
     void draw(float playerX, float playerY, float playerZ,
               float lookDirX, float lookDirY, float lookDirZ, const class ChunkManager* manager = nullptr,
               int* vertBudget = nullptr, int* rebuildBandBudget = nullptr);
-    void update(const class ChunkManager* manager = nullptr);
+    void update(const class ChunkManager* manager = nullptr, bool pauseSecondaryStructures = false);
     int highestGeneratedY = 0;
     bool refreshBorderFaces(const class ChunkManager* manager, int maxColumns = 1000);   // true = termino todo el borde (si no, sigue en la proxima llamada)
     int borderRefreshCursor = 0;
@@ -45,6 +45,7 @@ public:
     bool isGenerationComplete() const;
 
     bool saveToFile(const char* path) const;
+    bool saveToFileAsync(const char* path) const;
     bool loadFromFile(const char* path);   // lee el archivo (etapa 1); el chunk queda "cargando" hasta que continueLoad() devuelva true
     bool continueLoad();                   // etapa 2, repartida en cuadros: clima, bioma y colores, ocupacion. true = el chunk quedo completo
 
@@ -234,8 +235,8 @@ private:
     u32 canaryBeforeOccupancy = 0xDEAD0005;
     unsigned int occupancy[WorldConfig::SIZE_X][WorldConfig::SIZE_Z][4] = {};
     u32 canaryAfterOccupancy = 0xDEAD0006;
-    void rebuildColumnOccupancy(int xi, int zi);
-    void computeColumnFacesBitwise(int xi, int zi, const class ChunkManager* manager);
+    ITCM_CODE void rebuildColumnOccupancy(int xi, int zi);
+    ITCM_CODE void computeColumnFacesBitwise(int xi, int zi, const class ChunkManager* manager);
     u8 getFaceLightRaw(int nxi, int nyi, int nzi, const class ChunkManager* manager) const;
     bool initialSkyLightPending = false;
     bool checkMemoryCanaries() const {

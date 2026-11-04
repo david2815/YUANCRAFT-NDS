@@ -152,7 +152,7 @@ public:
     }
 
     // Desempaquetado a un buffer lineal
-    inline void unpack(BlockType* out128) const {
+    ITCM_CODE void unpack(BlockType* out128) const {
         int idx = 0;
         for (int i = 0; i < runCount; i++) {
             BlockType t = runs[i].type;

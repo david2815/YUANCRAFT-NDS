@@ -1,4 +1,8 @@
 #include "Hardware.h"
+
+bool g_isDSi = false;
+#include "AsyncSaveManager.h"
+#include "Hardware.h"
 #include <nds.h>
 #include <stdio.h>
 #include <fat.h>
@@ -434,7 +438,10 @@ int main(void) {
     consoleDemoInit();
 
     // Verificacion y deteccion dinamica de hardware en arranque
+    g_isDSi = isDSiMode();
+    Hardware::initHardwareProfile();
     Hardware::printHardwareInfo();
+    AsyncSaveManager::init();
 
     Renderer renderer;
     renderer.init();
@@ -484,7 +491,8 @@ int main(void) {
     int controlMode = 0;
     bool thirdPerson = false;     // camara en tercera persona (minibutton2), vista trasera de Beta 1.7.3
     bool paused = false;          // menu de pausa abierto (el juego sigue corriendo, solo se bloquean los controles)
-    int pauseView = 0;            // 0 = cerrado, 1 = menu de pausa, 2 = opciones (consola)
+    int pauseView = 0;            // 0 = cerrado, 1 = pausa, 2 = opciones, 3 = guardando seguro (bloqueado), 4 = guardado completo
+    bool isSavingWorld = false;      // congelamiento estricto de UI/botones durante guardado seguro
     bool saveRequested = false;   // boton Save game del menu de pausa
     bool quitRequested = false;   // boton Quit to title del menu de pausa
 
@@ -596,6 +604,11 @@ int main(void) {
 
     ChunkManager* chunkManager = nullptr;
     Player* player = nullptr;
+// Fast Data Tightly Coupled Memory (DTCM) para acceso a latencia cero
+static DTCM_BSS Player s_dtcmPlayer;
+static DTCM_BSS Chunk* s_dtcmCurrentChunk __attribute__((unused)) = nullptr;
+static DTCM_BSS Chunk* s_dtcmActiveChunks[9] __attribute__((unused));
+
 
     const int MAX_DROPPED_ITEMS = 48; // al morir se sueltan hasta 36 pilas del inventario de golpe
     DroppedItem droppedItems[MAX_DROPPED_ITEMS];
@@ -695,7 +708,9 @@ int main(void) {
         chunkManager = new ChunkManager(worldSeed, startChunkX, startChunkZ);
         renderer.setupProjection(); glMatrixMode(GL_MODELVIEW);   // la niebla y el plano lejano dependen del modo de chunks que acaba de fijar el ChunkManager
 
-        player = new Player();
+        player = &s_dtcmPlayer;
+        *player = Player();
+        s_dtcmCurrentChunk = nullptr;
         inventoryOpen = false;
         craftingOpen = false;
         inventorySelectedSlot = -1;
@@ -789,6 +804,7 @@ Weather::load();
 { char wolfPath[80]; WorldSave::getActiveFilePath("wolves.dat", wolfPath); HostileManager::saveWolves(wolfPath); }
 { char notePath[80]; WorldSave::getActiveFilePath("notes.dat", notePath); NoteBlocks::saveToFile(notePath); }
 
+        AsyncSaveManager::flushAll();
         delete chunkManager;
         chunkManager = nullptr;
         if (!reload) for (int i = 0; i < MAX_DROPPED_ITEMS; i++) droppedItems[i] = DroppedItem();
@@ -870,6 +886,7 @@ Weather::load();
 { char wolfPath[80]; WorldSave::getActiveFilePath("wolves.dat", wolfPath); HostileManager::saveWolves(wolfPath); }
 { char notePath[80]; WorldSave::getActiveFilePath("notes.dat", notePath); NoteBlocks::saveToFile(notePath); }
 
+        AsyncSaveManager::flushAll();
         delete chunkManager;
         chunkManager = nullptr;
         // Entity en el mundo: los objetos que soltaste al morir se quedan donde cayeron (esperan quietos hasta que su chunk se cargue). Solo se pierden los del Nether, porque se reaparece en la superficie
@@ -922,8 +939,7 @@ Weather::load();
 { char wolfPath[80]; WorldSave::getActiveFilePath("wolves.dat", wolfPath); HostileManager::loadWolves(wolfPath); }
 { char notePath[80]; WorldSave::getActiveFilePath("notes.dat", notePath); NoteBlocks::loadFromFile(notePath); }
 
-        delete player;
-        player = new Player();       // cuerpo entero otra vez, quieto; el inventario sigue siendo el que quedó tras soltarlo todo
+        *player = Player();       // cuerpo entero en DTCM otra vez, quieto; el inventario sigue siendo el que quedó tras soltarlo todo
         healthState = HealthState(); // vida llena
         sleeping = false; sleepTimer = 0;
         deathHandled = false;
@@ -1175,6 +1191,10 @@ Weather::load();
         scanKeys();
         u32 keys_down = keysDown();
         u32 keys_held = keysHeld();
+        if (isSavingWorld) {
+            keys_down = 0;
+            keys_held = 0;
+        }
 
         // El panorama vive en el menú principal, en opciones y en la selección de mundo: en cualquier otro estado se libera (y el juego recupera su VRAM y su proyección)
         if (state != STATE_MENU && state != STATE_OPTIONS && state != STATE_WORLD_SELECT && state != STATE_CREATE_WORLD) TopScreenMenu::suspend();
@@ -1435,6 +1455,7 @@ Weather::load();
             const bool closeNow = paused && pauseView == 1 && (keys_down & KEY_START);
             auto closePause = [&]() {
                 paused = false; pauseView = 0;
+                isSavingWorld = false;
                 if (consoleVisible) { consoleDemoInit(); }
                 else {
                     GameplayHotbar::invalidate();   // la imagen de pausa es de 8 bits: render() vuelve a crear el fondo de la hotbar (16 bits) sin tocar la pantalla de arriba
@@ -1456,9 +1477,19 @@ Weather::load();
                 if (pb != PauseScreen::BTN_NONE) Sound::uiClick();
                 if (pb == PauseScreen::BTN_BACK) closePause();
                 else if (pb == PauseScreen::BTN_OPTIONS) { pauseView = 2; chunkModeAtOptions = Options::get().chunkMode; SettingsMenu::open(); }
-                else if (pb == PauseScreen::BTN_SAVE) saveRequested = true;
+                else if (pb == PauseScreen::BTN_SAVE) {
+                    // Iniciar guardado seguro a prueba de fallos: bloqueo estricto de entradas
+                    isSavingWorld = true;
+                    pauseView = 3;
+                    int modChunks = chunkManager ? chunkManager->countModifiedChunks() : 0;
+                    AsyncSaveManager::startSaveSession(modChunks);
+                    consoleDemoInit();
+                    PauseScreen::showSavingProgress(AsyncSaveManager::getProgressPercent(), AsyncSaveManager::getCompletedTasks(), AsyncSaveManager::getTotalTasks());
+                    saveRequested = true; // ejecuta la serializacion en este frame
+                }
                 else if (pb == PauseScreen::BTN_QUIT) quitRequested = true;
             } else if (paused && pauseView == 2) {
+                // Menu de opciones en pausa: inputs libres y ceder ciclo con swiWaitForVBlank para evitar deadlock/congelamiento
                 if (SettingsMenu::update(keys_down)) {
                     autoJumpEnabled = Options::get().autoJump;
                     controlMode = Options::get().controlMode;
@@ -1466,6 +1497,37 @@ Weather::load();
                     pauseView = 1;
                     PauseScreen::show();
                 }
+                swiWaitForVBlank();
+                continue;
+            } else if (paused && pauseView == 3) {
+                // Estado de guardado seguro bloqueado: se procesa el volcado asincrono
+                AsyncSaveManager::processQueue();
+                PauseScreen::showSavingProgress(AsyncSaveManager::getProgressPercent(), AsyncSaveManager::getCompletedTasks(), AsyncSaveManager::getTotalTasks());
+                if (AsyncSaveManager::isSavingComplete()) {
+                    isSavingWorld = false; // Desbloqueo estricto unicamente tras completarse con exito
+                    pauseView = 4;
+                    PauseScreen::showSaveComplete();
+                }
+                swiWaitForVBlank();
+                continue;
+            } else if (paused && pauseView == 4) {
+                // Estado post-guardado desbloqueado: el usuario elige continuar o salir
+                bool doContinue = (keys_down & KEY_A);
+                bool doQuit = (keys_down & KEY_B);
+                if (keys_down & KEY_TOUCH) {
+                    PauseScreen::Button cb = PauseScreen::touchedSaveComplete(pTouch.px, pTouch.py);
+                    if (cb == PauseScreen::BTN_CONTINUE) doContinue = true;
+                    else if (cb == PauseScreen::BTN_QUIT) doQuit = true;
+                }
+                if (doContinue) {
+                    Sound::uiClick();
+                    closePause();
+                } else if (doQuit) {
+                    Sound::uiClick();
+                    quitRequested = true;
+                }
+                swiWaitForVBlank();
+                continue;
             }
         }
         if (reloadChunkModeRequested && !quitRequested && !titleMenuRequested) {
@@ -1476,17 +1538,35 @@ Weather::load();
         }
         if (quitRequested || titleMenuRequested) {
             quitRequested = false; paused = false; pauseView = 0;
+            isSavingWorld = false;
             Prof::flushSpikes();   // se guardan los picos anotados antes de salir
             state = STATE_MENU;
 
             WorldSave::endSession();
 
+            AsyncSaveManager::flushAll();
+            AsyncSaveManager::resetSaveSession();
             delete chunkManager;
-            delete player;
+            // s_dtcmPlayer resides in DTCM static memory: must NOT call delete player!
             delete inventory;
             chunkManager = nullptr;
             player = nullptr;
             inventory = nullptr;
+            s_dtcmCurrentChunk = nullptr;
+            for (int i = 0; i < 9; i++) s_dtcmActiveChunks[i] = nullptr;
+            GameplayHotbar::invalidate();
+
+            Furnace::clearAll();
+            ChestStore::clearAll();
+            MinecartManager::clear();
+            BoatManager::clear(); Maps::reset(); Weather::reset(); Spawners::clear(); Clouds::reset(); Particles::clear();
+            PaintingManager::clear();
+            SignManager::clear();
+            HostileManager::clearWolves();
+            TntManager::clear();
+            Projectiles::clear(); FishingHook::clear();
+            Dispenser::clearQueue();
+            NoteBlocks::clearAll();
 
             SubScreenMenu::init(WorldSave::worldSlotExists(1));
             TopScreenMenu::init();
@@ -1496,7 +1576,11 @@ Weather::load();
 
         Governor::setEnabled(true);
         Chunk::setBudgetPercent(Governor::budgetPercent());   // si el cuadro anterior se pasó, los presupuestos se recortan
-        { PROF(Prof::UPDATE); chunkManager->update(player->x, player->z); }
+        float ldx = 0.0f, ldy = 0.0f, ldz = 0.0f;
+        player->getLookDirection(ldx, ldy, ldz);
+        { PROF(Prof::UPDATE); chunkManager->update(player->x, player->z, ldx, ldz); }
+        AsyncSaveManager::processQueue();
+        s_dtcmCurrentChunk = chunkManager ? chunkManager->getCenterChunk() : nullptr;
 
         touchPosition touchXY;
         touchRead(&touchXY);
@@ -2332,7 +2416,10 @@ Weather::load();
 
         frameCounter++;
         renderFrameCounter++;
-        bool shouldRender = (renderFrameCounter % 3) == 0;
+        // Target de FPS configurable: Perfil Fluidez (60 FPS) vs Distancia/Estandar (30 FPS)
+        const bool is60Fps = g_isDSi && (Options::get().dsiPerformanceProfile == 1);
+        const int renderInterval = is60Fps ? 1 : 2; // 60 FPS = cada frame; 30 FPS = cada 2 frames
+        bool shouldRender = (renderFrameCounter % renderInterval) == 0;
 
         gameTimeTicks = (gameTimeTicks + 1) % CYCLE_TICKS;
         int skylightStep = computeSkylightSubtract(gameTimeTicks);
@@ -3280,7 +3367,7 @@ Weather::load();
         if (saveRequested && !healthState.dead) {
             saveRequested = false;
             Prof::flushSpikes(); // muerto no se guarda: el mundo debe poder volver a antes de morir
-            chunkManager->saveModifiedChunks();
+            int actualSaved = chunkManager ? chunkManager->saveModifiedChunks() : 0;
 
             static WorldMetadata meta;
             meta.seed = chunkManager->getSeed();
@@ -3350,6 +3437,7 @@ Weather::load();
 { char notePath[80]; WorldSave::getActiveFilePath("notes.dat", notePath); NoteBlocks::saveToFile(notePath); }
 
             WorldSave::commitSession();
+            AsyncSaveManager::notifyAllEnqueued(actualSaved);
         }
         saveRequested = false;
     }

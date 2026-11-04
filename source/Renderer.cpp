@@ -14,6 +14,7 @@ void Renderer::init() {
     glClearColor(0, 0, 20, 31);
     glClearDepth(GL_MAX_DEPTH);
     glViewport(0, 0, 255, 191);
+    glEnable(GL_FOG);
 }
 
 void Renderer::setupProjection() {
