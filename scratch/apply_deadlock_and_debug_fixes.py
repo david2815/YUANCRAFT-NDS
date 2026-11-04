@@ -560,3 +560,4 @@ static inline bool isValidMainRamPointer(const void* ptr, bool isDSi) {
 
 if __name__ == "__main__":
     apply_fixes()
+

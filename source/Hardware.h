@@ -78,7 +78,6 @@ public:
     }
 
     static inline bool isOverclocked() {
-        if (!initedRef()) initHardwareProfile();
         return ocFlag();
     }
 
@@ -87,7 +86,6 @@ public:
     }
 
     static inline int getCpuFrequencyMHz() {
-        if (!initedRef()) initHardwareProfile();
         return cpuFreqRef();
     }
 
@@ -111,7 +109,6 @@ public:
     }
 
     static inline void printHardwareInfo() {
-        if (!initedRef()) initHardwareProfile();
         iprintf("\n=== HARDWARE PROFILE DETECTION ===\n");
         iprintf("Device: %s\n", getDeviceName());
         iprintf("RAM: %d MB | ARM9 Clock: %d MHz\n", getRamSizeMB(), getCpuFrequencyMHz());
