@@ -96,8 +96,11 @@ namespace {
         glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
         glBegin(GL_QUADS);
         for (int f = 0; f < 6; f++) {
-            const int s = v * SHADE[f] / 255;
-            glColor3b((u8)(r * s / 255), (u8)(g * s / 255 * gb), (u8)(b * s / 255 * gb));
+            const int s = ((v * SHADE[f] + 1) * 257) >> 16;
+            const int cr = ((r * s + 1) * 257) >> 16;
+            const int cg = (int)((((g * s + 1) * 257) >> 16) * gb);
+            const int cb = (int)((((b * s + 1) * 257) >> 16) * gb);
+            glColor3b((u8)cr, (u8)cg, (u8)cb);
             for (int k = 0; k < 4; k++) glVertex3v16(p.quads[f].px[k], p.quads[f].py[k], p.quads[f].pz[k]);
         }
         glEnd();

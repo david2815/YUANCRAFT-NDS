@@ -16,21 +16,39 @@
 // - Permite lectura directa en tiempo real O(runs) donde runs <= 6 en promedio.
 // ============================================================================
 
-struct RLERun {
+// Verificación de protección estricta de memoria para VRAM de la GPU
+static inline bool isVramPointer(const void* ptr) {
+    uintptr_t addr = (uintptr_t)ptr;
+    return (addr >= 0x06000000 && addr < 0x07000000);
+}
+
+// Validación de memoria segura para perfiles DS (4 MB) y DSi (16 MB)
+static inline bool isValidMainRamPointer(const void* ptr, bool isDSi) {
+    if (!ptr) return false;
+    uintptr_t addr = (uintptr_t)ptr;
+    if (isVramPointer(ptr)) return false;
+    uintptr_t maxAddr = isDSi ? 0x03000000 : 0x02400000;
+    return (addr >= 0x02000000 && addr < maxAddr);
+}
+
+struct __attribute__((aligned(2))) RLERun {
     BlockType type; // 1 byte: tipo de bloque
     u8 length;      // 1 byte: longitud del tramo (1..128)
 };
 
-class VoxelColumnRLE {
+// Alineación estricta de 32 bits (4 bytes) para evitar desfasamientos de memoria en GPU/DMA
+class __attribute__((aligned(4))) VoxelColumnRLE {
 public:
-    // 24 tramos x 2 bytes = 48 bytes por columna (cabe perfectamente en 2 líneas de caché de 32B)
+    // 24 tramos x 2 bytes = 48 bytes por columna
     static constexpr int MAX_RUNS = 24;
 
     u8 runCount;
+    u8 _pad[3]; // Relleno explícito a 32 bits: sizeof(VoxelColumnRLE) = 52 bytes (múltiplo de 4)
     RLERun runs[MAX_RUNS];
 
     inline void initEmpty() {
         runCount = 1;
+        _pad[0] = _pad[1] = _pad[2] = 0;
         runs[0].type = BlockType::AIR;
         runs[0].length = (u8)WorldConfig::SIZE_Y; // 128 bloques de aire
     }
@@ -152,7 +170,7 @@ public:
     }
 
     // Desempaquetado a un buffer lineal
-    inline void unpack(BlockType* out128) const {
+    void unpack(BlockType* out128) const {
         int idx = 0;
         for (int i = 0; i < runCount; i++) {
             BlockType t = runs[i].type;

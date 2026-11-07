@@ -24,6 +24,14 @@ public:
     static int compressLZ10(const u8* src, int srcLen, u8* dst, int maxDstLen) {
         if (!src || !dst || srcLen <= 0 || maxDstLen < 8) return 0;
 
+        // Protección absoluta de VRAM: no comprimir desde ni hacia bancos VRAM de la GPU
+        uintptr_t srcAddr = (uintptr_t)src;
+        uintptr_t dstAddr = (uintptr_t)dst;
+        if ((srcAddr >= 0x06000000 && srcAddr < 0x07000000) ||
+            (dstAddr >= 0x06000000 && dstAddr < 0x07000000)) {
+            return 0;
+        }
+
         // Cabecera Nintendo LZ10:
         // Byte 0: 0x10 (formato LZ77 / LZSS)
         // Bytes 1-3: tamaño sin comprimir en 24 bits little-endian
@@ -89,6 +97,19 @@ public:
     // Descompresión por hardware/BIOS usando libnds
     static inline bool decompressBIOS(const void* src, void* dst) {
         if (!src || !dst) return false;
+
+        uintptr_t srcAddr = (uintptr_t)src;
+        uintptr_t dstAddr = (uintptr_t)dst;
+
+        // Protección absoluta de VRAM: no descompresión a bancos VRAM del motor 3D
+        if ((srcAddr >= 0x06000000 && srcAddr < 0x07000000) ||
+            (dstAddr >= 0x06000000 && dstAddr < 0x07000000)) {
+            return false;
+        }
+
+        // Validación estricta de alineación de 32 bits requerida por la BIOS (SWI LZ77)
+        if (((srcAddr | dstAddr) & 3) != 0) return false;
+
         const u8* p = (const u8*)src;
         if (p[0] != 0x10) return false; // Comprobación de cabecera LZ10
 

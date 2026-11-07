@@ -1,7 +1,7 @@
 #include "DisplayListBuilder.h"
 
 DisplayListBuilder::DisplayListBuilder(u32* outBuf, u32 cap)
-    : out(outBuf), wordIndex(0), capacity(cap), overflow(false), cmdCount(0), paramCount(0), vertexCount(0) {}
+    : out(outBuf), wordIndex(0), capacity(cap), overflow(false), cmdCount(0), paramCount(0), vertexCount(0), lastPolyFormat(0xFFFFFFFF) {}
 
 void DisplayListBuilder::writeWord(u32 word) {
     if (out) {
@@ -16,6 +16,8 @@ void DisplayListBuilder::pushParam(u32 word) {
 }
 
 void DisplayListBuilder::polyFormat(u32 attr) {
+    if (lastPolyFormat == attr) return;
+    lastPolyFormat = attr;
     pushCommand(FIFO_POLY_FORMAT);
     pushParam(attr);
     maybeFlush();
@@ -101,8 +103,7 @@ void DisplayListBuilder::mtxTrans(int x, int y, int z) {
 }
 
 void DisplayListBuilder::end() {
-    pushCommand(FIFO_END);
-    maybeFlush();
+    // GFX_END (0x41) omitido para evitar bloqueos del FIFO DMA (videoGL.h y GBATEK)
 }
 
 u32 DisplayListBuilder::finish() {

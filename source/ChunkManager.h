@@ -19,7 +19,7 @@ public:
     // Llamar cada frame: genera columnas pendientes de todos los
     // chunks activos, y asegura que el chunk del jugador + sus 8
     // vecinos existan
-    void update(float playerX, float playerZ);
+    void update(float playerX, float playerZ, float lookDirX = 0.0f, float lookDirZ = 0.0f);
     void refreshNeighborFace(float worldX, float worldY, float worldZ) const;
 
     // Retorna el chunk que contiene la posición de mundo dada, o
@@ -28,14 +28,37 @@ public:
 
     // true solo cuando TODOS los chunks activos terminaron de generar
     bool isGenerationComplete() const;
+    bool isInitialGenerationComplete() const {
+        if (windowRadius <= 1) return isGenerationComplete();
+        return !fillPending;
+    }
+    bool areSpawnChunksReady(float playerX, float playerZ) const;
+    int getSpawnChunkFailReason(float playerX, float playerZ) const;
+    void buildSpawnChunks(float playerX, float playerZ);
 
     Chunk* getCenterChunk() const { return chunks[centerIndex]; }
+    void setWindowRadius(int newRadius);
+    int getWindowRadius() const { return windowRadius; }
+    Chunk* getChunkSlot(int slot) {
+        if (slot >= 0 && slot < maxChunks && slotUsed[slot]) return chunks[slot];
+        return nullptr;
+    }
+    void clearAwaitingLoad(int slot) {
+        if (slot >= 0 && slot < maxChunks) {
+            awaitingLoad[slot] = false;
+            loadingBiome[slot] = false;
+        }
+    }
     unsigned int getSeed() const { return seed; }
+    int countModifiedChunks() const;
     int saveModifiedChunks() const;
     bool isBlockPresentAt(float x, float y, float z) const;
     void forceFullRecalculation() const;
     BlockType getBlockTypeAt(float x, float y, float z) const;
     BiomeType getBiomeAt(float worldX, float worldZ) const;
+    bool isSlotUsed(int i) const { return i >= 0 && i < maxChunks && slotUsed[i]; }
+    bool isSlotComplete(int i) const { return isSlotUsed(i) && chunks[i] && chunks[i]->isGenerationComplete(); }
+    bool getFillPending() const { return fillPending; }
     int heavyWorkRotationStart = 0;
     int pendingLoadSlots[CAP_CHUNKS];
     int pendingLoadCount = 0;

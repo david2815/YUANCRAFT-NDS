@@ -22,6 +22,7 @@ namespace Options {
         bool inventoryMap;         // el jugador siempre lleva un mapa en la casilla 9 de la barra (como la Legacy Edition)
 	bool oldMobSpawnLimit;
         bool showFps;              // contador de FPS en pantalla sin impacto de rendimiento
+        unsigned char dsiPerformanceProfile; // Perfil DSi: 0 = Distancia (30 FPS), 1 = Fluidez (60 FPS)
     };
 
     Data& get();

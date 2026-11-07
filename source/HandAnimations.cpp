@@ -179,18 +179,23 @@ void drawFirstPersonArm() {
     glTranslatef(-5.0f * S, 2.0f * S, 0.0f);
     glRotatef(0.1f * (180.0f / kPi), 0.0f, 0.0f, 1.0f);
 
-    glBindTexture(0, Texture::skinTextureID);
-    glBegin(GL_QUADS);
+    // Precalcular normales y sqrtf ANTES de glBegin
+    float armNormals[6][3];
     for (int f = 0; f < 6; f++) {
         const Face& q = faces[f];
-
-        // TexturedQuad.draw: normal = (v1 - v2) x (v1 - v0)
         float ax = q.v[1].x - q.v[2].x, ay = q.v[1].y - q.v[2].y, az = q.v[1].z - q.v[2].z;
         float bx = q.v[1].x - q.v[0].x, by = q.v[1].y - q.v[0].y, bz = q.v[1].z - q.v[0].z;
         float nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
         float nl = sqrtf(nx * nx + ny * ny + nz * nz);
-        if (nl > 0.0f) { nx /= nl; ny /= nl; nz /= nl; }
-        nrm(nx, ny, nz);
+        if (nl > 0.0f) { float inv = 1.0f / nl; nx *= inv; ny *= inv; nz *= inv; }
+        armNormals[f][0] = nx; armNormals[f][1] = ny; armNormals[f][2] = nz;
+    }
+
+    glBindTexture(0, Texture::skinTextureID);
+    glBegin(GL_QUADS);
+    for (int f = 0; f < 6; f++) {
+        const Face& q = faces[f];
+        nrm(armNormals[f][0], armNormals[f][1], armNormals[f][2]);
 
         // TexturedQuad: v0=(u2,v1) v1=(u1,v1) v2=(u1,v2) v3=(u2,v2), con un margen de 0,1 texel
         const float m = 0.1f;
@@ -501,7 +506,7 @@ void drawMapHeld(int mapId, float sw, float eq, float pitchDS, float yawDS, floa
         const int cr = r.c == 1 ? 214 : 153, cg = r.c == 1 ? 190 : 135, cb = r.c == 1 ? 150 : 108;
         const float x0 = -7.0f + r.x * 142.0f / 64.0f, x1 = -7.0f + (r.x + r.w) * 142.0f / 64.0f;
         const float y0 = -7.0f + r.y * 142.0f / 64.0f, y1 = -7.0f + (r.y + r.h) * 142.0f / 64.0f;
-        mapQuad(x0 * P, y0 * P, x1 * P, y1 * P, 0.0f, cr * sc / 255, cg * sc / 255, cb * sc / 255);
+        mapQuad(x0 * P, y0 * P, x1 * P, y1 * P, 0.0f, ((cr * sc + 1) * 257) >> 16, ((cg * sc + 1) * 257) >> 16, ((cb * sc + 1) * 257) >> 16);
     }
     // MapItemRenderer: el pixel (x, y) va de x a x+1 y de y a y+1
     const u8* px = Maps::pixels(mapId);
@@ -517,7 +522,7 @@ void drawMapHeld(int mapId, float sw, float eq, float pitchDS, float yawDS, floa
                 while (i + run < grid && px[((i + run) * k + k / 2) + (j * k + k / 2) * 128] == val) run++;
                 int r, g, bl;
                 if (Maps::colorOf(val, r, g, bl))
-                    mapQuad((float)(i * k) * P, (float)(j * k) * P, (float)((i + run) * k) * P, (float)((j + 1) * k) * P, -0.008f, r * sc / 255, g * sc / 255, bl * sc / 255);
+                    mapQuad((float)(i * k) * P, (float)(j * k) * P, (float)((i + run) * k) * P, (float)((j + 1) * k) * P, -0.008f, ((r * sc + 1) * 257) >> 16, ((g * sc + 1) * 257) >> 16, ((bl * sc + 1) * 257) >> 16);
                 i += run;
             }
         }

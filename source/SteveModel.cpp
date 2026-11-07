@@ -81,8 +81,11 @@ namespace {
         if (p.rx != 0.0f) glRotatef(p.rx * RAD_TO_DEG, 1.0f, 0.0f, 0.0f);
         glBegin(GL_QUADS);
         for (int i = 0; i < n; i++) {
-            const int s = v * FACE_SHADE[q[i].face] / 255;
-            glColor3b((u8)(c.r * s / 255), (u8)(c.g * s / 255 * gb), (u8)(c.b * s / 255 * gb));
+            const int s = ((v * FACE_SHADE[q[i].face] + 1) * 257) >> 16;
+            const int cr = ((c.r * s + 1) * 257) >> 16;
+            const int cg = (int)((((c.g * s + 1) * 257) >> 16) * gb);
+            const int cb = (int)((((c.b * s + 1) * 257) >> 16) * gb);
+            glColor3b((u8)cr, (u8)cg, (u8)cb);
             for (int k = 0; k < 4; k++) glVertex3v16(q[i].x[k], q[i].y[k], q[i].z[k]);
         }
         glEnd();

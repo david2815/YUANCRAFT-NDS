@@ -14,12 +14,12 @@ class DisplayListBuilder;
 
 class Chunk {
 public:
-    Chunk(int chunkX, int chunkZ, unsigned int seed);
+    Chunk(int chunkX = 0, int chunkZ = 0, unsigned int seed = 0);
     ~Chunk();
     void draw(float playerX, float playerY, float playerZ,
               float lookDirX, float lookDirY, float lookDirZ, const class ChunkManager* manager = nullptr,
               int* vertBudget = nullptr, int* rebuildBandBudget = nullptr);
-    void update(const class ChunkManager* manager = nullptr);
+    void update(const class ChunkManager* manager = nullptr, bool pauseSecondaryStructures = false);
     int highestGeneratedY = 0;
     bool refreshBorderFaces(const class ChunkManager* manager, int maxColumns = 1000);   // true = termino todo el borde (si no, sigue en la proxima llamada)
     int borderRefreshCursor = 0;
@@ -45,6 +45,12 @@ public:
     bool isGenerationComplete() const;
 
     bool saveToFile(const char* path) const;
+    bool saveToFileAsync(const char* path) const;
+    // Mecanismo Fail-Safe y volcado seguro de chunks
+    void fillWithAir();
+    void generateEmergencyChunk();
+    bool loadFromRawBuffer(const u8* rawData, int rawSize);
+
     bool loadFromFile(const char* path);   // lee el archivo (etapa 1); el chunk queda "cargando" hasta que continueLoad() devuelva true
     bool continueLoad();                   // etapa 2, repartida en cuadros: clima, bioma y colores, ocupacion. true = el chunk quedo completo
 
@@ -97,6 +103,8 @@ public:
     void recomputeColumnRange(int xi, int zi, int yiLo, int yiHi, const class ChunkManager* manager); // igual, pero ensucia solo esas alturas
     bool isInitialSkyLightPending() const { return initialSkyLightPending; }
     bool hasBuiltDisplayList() const { return displayListEverBuilt; }
+    bool isDisplayListDirty() const { return displayListDirty; }
+    friend class ChunkManager;
     static int getDisplayListBytes();
 
     int getSkyBottom(int xi, int zi) const { return skyBottom[xi][zi]; }
@@ -104,7 +112,8 @@ public:
     static void beginRebuildFrame();
     void scheduleFullRefresh();
     static void beginHeavyFrame();
-    static void setBudgetPercent(int percent);   // escala los presupuestos de tiempo de este cuadro (Governor): 100 = normales
+    static void setBudgetPercent(int percent);
+    static bool isHighBudget();   // escala los presupuestos de tiempo de este cuadro (Governor): 100 = normales
     static bool heavyBudgetLeft();
     void freeDisplayLists();
     void setInWindow(bool v) {
@@ -188,11 +197,11 @@ private:
     static constexpr int DL_REBUILD_BANDS_PER_CALL = 2;
 
     u32 canaryBeforeBlocks = 0xDEAD0001;
-    BlockType blocks[WorldConfig::SIZE_X][WorldConfig::SIZE_Y][WorldConfig::SIZE_Z];
-    VoxelColumnRLE rleCols[WorldConfig::SIZE_X][WorldConfig::SIZE_Z];
+    BlockType blocks[WorldConfig::SIZE_X][WorldConfig::SIZE_Y][WorldConfig::SIZE_Z] __attribute__((aligned(4)));
+    VoxelColumnRLE rleCols[WorldConfig::SIZE_X][WorldConfig::SIZE_Z] __attribute__((aligned(4)));
     u32 canaryAfterBlocks = 0xDEAD0002;
     u32 canaryBeforeFaceCache = 0xDEAD0003;
-    FaceMask faceCache[WorldConfig::SIZE_X][WorldConfig::SIZE_Y][WorldConfig::SIZE_Z];
+    FaceMask faceCache[WorldConfig::SIZE_X][WorldConfig::SIZE_Y][WorldConfig::SIZE_Z] __attribute__((aligned(4)));
     u32 canaryAfterFaceCache = 0xDEAD0004;
 	
     int chunkX, chunkZ;
@@ -232,7 +241,7 @@ private:
     void spreadSkyFromColumn(int xi, int zi, const class ChunkManager* manager, int onlyDir = -1);
 
     u32 canaryBeforeOccupancy = 0xDEAD0005;
-    unsigned int occupancy[WorldConfig::SIZE_X][WorldConfig::SIZE_Z][4] = {};
+    unsigned int occupancy[WorldConfig::SIZE_X][WorldConfig::SIZE_Z][4] __attribute__((aligned(4))) = {};
     u32 canaryAfterOccupancy = 0xDEAD0006;
     void rebuildColumnOccupancy(int xi, int zi);
     void computeColumnFacesBitwise(int xi, int zi, const class ChunkManager* manager);
@@ -270,7 +279,7 @@ private:
 
     // Líquidos (BlockFluid, RenderBlocks.renderBlockFluids)
     static constexpr int LIQUID_META_BYTES = WorldConfig::SIZE_X * WorldConfig::SIZE_Y * WorldConfig::SIZE_Z / 2;
-    u8 liquidMeta[LIQUID_META_BYTES] = {};
+    u8 liquidMeta[LIQUID_META_BYTES] __attribute__((aligned(4))) = {};
     int liquidMetaGet(int xi, int yi, int zi) const {
         int i = (xi * WorldConfig::SIZE_Y + yi) * WorldConfig::SIZE_Z + zi;
         return (liquidMeta[i >> 1] >> ((i & 1) * 4)) & 0x0F;

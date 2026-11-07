@@ -48,6 +48,7 @@ private:
     u32 paramQueue[12];
     int paramCount;
     u32 vertexCount;
+    u32 lastPolyFormat;
 
     void writeWord(u32 word);
     void pushParam(u32 word);

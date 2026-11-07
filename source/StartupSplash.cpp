@@ -4,30 +4,43 @@
 #include "mojanglogo.h"
 
 namespace {
-    const int LOGO_FRAMES = 60;   // 1 segundo por logo, cambio de golpe
+    const int LOGO_FRAMES = 60;   // 1 segundo por logo (60 frames a 60 Hz)
 
     void showLogo(const unsigned int* bitmap, const unsigned short* pal, unsigned int palLen, bool hold) {
-        swiWaitForVBlank();   // la imagen cambia al empezar el cuadro, sin cortes a medias
+        // 1. Configurar modo gráfico 2D y banco de VRAM B en pantalla principal
         videoSetMode(MODE_5_2D | DISPLAY_BG3_ACTIVE);
         vramSetBankB(VRAM_B_MAIN_BG_0x06000000);
         const int id = bgInit(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0);
+
+        // 2. Limpieza de pantalla y paleta inicial a negro para evitar artefactos visuales
+        u16* gfx = (u16*)bgGetGfxPtr(id);
+        dmaFillWords(0, gfx, 256 * 192);
+        dmaFillHalfWords(0, BG_PALETTE, 512);
+
+        // 3. Descomprimir bitmap directamente en VRAM
+        decompress(bitmap, gfx, LZ77Vram);
+
+        // 4. Copiar paleta sincronizada en VBlank para despliegue instantáneo sin tearing
+        swiWaitForVBlank();
         dmaCopy(pal, BG_PALETTE, palLen);
-        decompress(bitmap, bgGetGfxPtr(id), LZ77Vram);   // directo a la VRAM: la imagen no queda en la RAM
-        if (hold) for (int f = 0; f < LOGO_FRAMES; f++) swiWaitForVBlank();
+
+        // 5. Mantener en pantalla durante los frames requeridos
+        if (hold) {
+            for (int f = 0; f < LOGO_FRAMES; f++) {
+                swiWaitForVBlank();
+            }
+        }
     }
 }
 
 void StartupSplash::show() {
-    // pantalla de abajo: sin capas, solo el color de fondo (blanco)
-    videoSetModeSub(MODE_0_2D);
-    setBackdropColorSub(RGB15(31, 31, 31));
-
+    // Despliegue secuencial de logos sin alterar registros de interrupción ni registros de control FIFO
     showLogo((const unsigned int*)eagteklogoBitmap, eagteklogoPal, eagteklogoPalLen, true);
     showLogo((const unsigned int*)mojanglogoBitmap, mojanglogoPal, mojanglogoPalLen, true);
-    // sin restaurar nada: el logo de Mojang y la pantalla blanca siguen ahi mientras se inicia libfat y se cargan las texturas
 }
 
 void StartupSplash::finish() {
+    // Restaurar el color de fondo neutro y la consola de depuración en pantalla inferior
     setBackdropColorSub(0);
-    consoleDemoInit();   // la consola de abajo como estaba antes del splash
 }
+

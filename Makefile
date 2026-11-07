@@ -138,23 +138,23 @@ $(SMALL_OFILES) : CXXFLAGS += -Os
 # Atlas con transparencia: alphakey (alfa -> FF00FF) y después grit con -gT FF00FF
 terrain.s terrain.h : terrain.png terrain.grit
 	$(ALPHAKEY) $(filter %.png,$^) terrain_keyed.png
-	cp $(filter %.grit,$^) terrain_keyed.grit
+	cp -f $(filter %.grit,$^) terrain_keyed.grit
 	grit terrain_keyed.png -fts -oterrain
 
 items.s items.h : items.png items.grit
 	$(ALPHAKEY) $(filter %.png,$^) items_keyed.png
-	cp $(filter %.grit,$^) items_keyed.grit
+	cp -f $(filter %.grit,$^) items_keyed.grit
 	grit items_keyed.png -fts -oitems
 
 # arrows.png (la flecha 3D, 32 x 32): alphakey y grit con -gT FF00FF (el color 0 de la paleta es transparente)
 arrows.s arrows.h : arrows.png arrows.grit
 	$(ALPHAKEY) $(filter %.png,$^) arrows_keyed.png
-	cp $(filter %.grit,$^) arrows_keyed.grit
+	cp -f $(filter %.grit,$^) arrows_keyed.grit
 	grit arrows_keyed.png -fts -oarrows
 
 icons.s icons.h : icons.png icons.grit
 	$(ALPHAKEY) $(filter %.png,$^) icons_keyed.png
-	cp $(filter %.grit,$^) icons_keyed.grit
+	cp -f $(filter %.grit,$^) icons_keyed.grit
 	grit icons_keyed.png -fts -oicons
 
 #---------------------------------------------------------------------------------

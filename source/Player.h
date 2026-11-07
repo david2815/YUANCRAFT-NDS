@@ -1,3 +1,4 @@
+#include "HwMath.h"
 #ifndef PLAYER_H
 #define PLAYER_H
 
@@ -10,6 +11,8 @@ public:
     float x, y, z;
     float yaw;
     float pitch;
+    float prevTickYaw = 0.0f;
+    float prevTickPitch = 0.0f;
 
     Player();
 
@@ -17,6 +20,8 @@ public:
     void handleInput(u32 keysHeld, const ChunkManager& chunkManager);
     void handleTouch(bool touching, int touchX, int touchY);
     void getLookDirection(float& outX, float& outY, float& outZ) const;
+    void getRenderLookDirection(float pt, float& outX, float& outY, float& outZ) const;
+    void getRenderAngles(float pt, float& outYaw, float& outPitch) const;
     // Tercera persona (EntityRenderer.orientCamera): hasta donde puede alejarse la camara detras de los ojos sin entrar en un bloque (maximo 4)
     float thirdPersonDistance(const ChunkManager& chunkManager, float eyeX, float eyeY, float eyeZ) const;
     float getBobStrengthDebug() const { return bobStrength; }
@@ -113,6 +118,9 @@ private:
     bool wasTouching = false;
     int prevTouchX = 0;
     int prevTouchY = 0;
+    int touchLostFrames = 0;
+    float smoothedDx = 0.0f;
+    float smoothedDy = 0.0f;
 
     float buttonLookSpeedH = 0.0f;
     float buttonLookSpeedV = 0.0f;

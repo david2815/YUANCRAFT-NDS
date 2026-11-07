@@ -1,3 +1,5 @@
+#include "IpcChunkLoader.h"
+#include "AsyncSaveManager.h"
 #include "Liquid.h"
 #include "Redstone.h"
 #include "PartialBlocks.h"
@@ -13,6 +15,8 @@
 #include "Profiler.h"
 #include "Caves.h"
 #include "Options.h"
+#include "DsiDebug.h"
+#include "Texture.h"
 #include <malloc.h>
 #include <new>
 #include <math.h>
@@ -42,18 +46,27 @@ ChunkManager::ChunkManager(unsigned int seed_, int startChunkX, int startChunkZ)
     Liquid::resetTicks(); // sin ticks de líquidos pendientes de otro mundo
     FallingBlocks::clear(); // ni bloques cayendo del mundo anterior
 
-    // Modo de chunks de Options (fast / ds / dsi). El dsi solo vale en una DSi; si no alcanza la RAM para el pozo de chunks
-    // (o queda muy poca libre despues) se baja al modo anterior.
     int mode = Options::get().chunkMode;
     if (mode > 2) mode = 1;
     if (mode == 2 && !isDSiMode()) mode = 1;
+
+    // Pre-allocated Chunk Pool en Main RAM (0x02000000):
+    // Se pre-asignan todos los chunks de una vez al iniciar el mundo según la capacidad
+    // máxima del hardware (5x5 en DS normal / 7x7 en DSi).
+    // Durante el gameplay y streaming se reusan via placement new en acquireChunk,
+    // garantizando CERO malloc/free, conmutación dinámica de radio sin recargar y cero fragmentación.
+    int allocMode = Hardware::isDSi() ? 2 : 1;
+    if (mode > allocMode) allocMode = mode;
+
     for (;;) {
-        const int radius = (mode == 0) ? 1 : (mode == 1 ? 2 : 3);
-        windowRadius = radius;
-        windowSide = 2 * radius + 1;
-        windowCount = 0;
-        for (int dx = -radius; dx <= radius; dx++) for (int dz = -radius; dz <= radius; dz++) if (cellInWindow(dx, dz, radius)) windowCount++;
-        maxChunks = windowCount + (radius > 1 ? 3 : 7);
+        const int allocRadius = (allocMode == 0) ? 1 : (allocMode == 1 ? 2 : 3);
+        int allocCount = 0;
+        for (int dx = -allocRadius; dx <= allocRadius; dx++) {
+            for (int dz = -allocRadius; dz <= allocRadius; dz++) {
+                if (cellInWindow(dx, dz, allocRadius)) allocCount++;
+            }
+        }
+        maxChunks = allocCount + (allocRadius > 1 ? 3 : 7);
         poolSize = maxChunks + POOL_SPARE;
 
         poolCount = 0;
@@ -64,14 +77,22 @@ ChunkManager::ChunkManager(unsigned int seed_, int startChunkX, int startChunkZ)
             poolInUse[poolCount] = false;
             poolCount++;
         }
-        struct mallinfo mi = mallinfo();
-        const long freeKB = ((long)(getHeapLimit() - getHeapEnd()) + (long)mi.fordblks) / 1024;
-        const long needKB = (mode == 2) ? 700 : 0;   // margen para las listas de dibujo
-        if (mode == 0 || (poolCount >= poolSize && freeKB >= needKB)) break;
+        if (allocMode == 0 || poolCount >= poolSize) break;
         for (int p = 0; p < poolCount; p++) delete pool[p];
         poolCount = 0;
-        mode--;
+        allocMode--;
     }
+
+    const int radius = (mode == 0) ? 1 : (mode == 1 ? 2 : 3);
+    windowRadius = radius;
+    windowSide = 2 * radius + 1;
+    windowCount = 0;
+    for (int dx = -radius; dx <= radius; dx++) {
+        for (int dz = -radius; dz <= radius; dz++) {
+            if (cellInWindow(dx, dz, radius)) windowCount++;
+        }
+    }
+
     // DSi aprovecha 133 MHz y 16 MB para generar mas columnas por cuadro con mayor presupuesto
     const int genCols = (mode == 0) ? 1 : (mode == 1 ? 3 : (Hardware::isDSi() ? 6 : 4));
     const int budgetMul = Hardware::isDSi() ? 2 : 1;
@@ -101,10 +122,40 @@ ChunkManager::ChunkManager(unsigned int seed_, int startChunkX, int startChunkZ)
 }
 
 ChunkManager::~ChunkManager() {
-    // chunks[] y la cola de guardado apuntan dentro del pool: se borra solo el pool
     for (int p = 0; p < poolCount; p++) {
         delete pool[p];
     }
+    poolCount = 0;
+}
+
+void ChunkManager::setWindowRadius(int newRadius) {
+    if (newRadius < 1) newRadius = 1;
+    int maxR = Hardware::isDSi() ? 3 : 2;
+    if (newRadius > maxR) newRadius = maxR;
+
+    windowRadius = newRadius;
+    windowSide = 2 * windowRadius + 1;
+    windowCount = 0;
+    for (int dx = -windowRadius; dx <= windowRadius; dx++) {
+        for (int dz = -windowRadius; dz <= windowRadius; dz++) {
+            if (cellInWindow(dx, dz, windowRadius)) windowCount++;
+        }
+    }
+    const int genCols = (windowRadius == 1) ? 1 : (windowRadius == 2 ? 3 : (Hardware::isDSi() ? 6 : 4));
+    const int budgetMul = Hardware::isDSi() ? 2 : 1;
+    WorldConfig::setChunkMode(windowRadius, genCols, budgetMul);
+
+    if (centerIndex >= 0 && slotUsed[centerIndex]) {
+        int ccx = chunkPosX[centerIndex];
+        int ccz = chunkPosZ[centerIndex];
+        for (int i = 0; i < maxChunks; i++) {
+            if (!slotUsed[i]) continue;
+            int dx = chunkPosX[i] - ccx;
+            int dz = chunkPosZ[i] - ccz;
+            chunks[i]->setInWindow(cellInWindow(dx, dz, windowRadius));
+        }
+    }
+    centerIndex = -1; // Forzar recentrado seguro en el siguiente frame sin recargar
 }
 
 int ChunkManager::worldToChunkCoord(float worldPos) const {
@@ -145,7 +196,7 @@ void ChunkManager::flushOnePendingSave() {
     Chunk* toSave = pendingSaveChunks[pendingSaveCount];
     char oldFilename[96];
     toSave->getSaveFilename(oldFilename);
-    toSave->saveToFile(oldFilename);
+    toSave->saveToFileAsync(oldFilename);
     releaseChunk(toSave);
 }
 
@@ -244,7 +295,7 @@ int ChunkManager::findOrCreateSlot(int cx, int cz, const int* protectX, const in
     return farthestIndex;
 }
 
-void ChunkManager::update(float playerX, float playerZ) {
+void ChunkManager::update(float playerX, float playerZ, float lookDirX, float lookDirZ) {
     auto needsHeavyWork = [this](int i) {
 	if (awaitingLoad[i]) return false;
         return !chunks[i]->isGenerationComplete() || chunks[i]->isCacheRecalcPending() || chunks[i]->isInitialSkyLightPending() || chunks[i]->isEmitterReseedPending();
@@ -260,17 +311,19 @@ void ChunkManager::update(float playerX, float playerZ) {
         }
     }
 
-    if (pendingLoadCount > 0) {
+    // 1. Procesar el protocolo IPC seguro de streaming de chunks sin bucles ciegos
+    IpcChunkLoader::update(this);
+
+    // 2. Si el canal IPC está disponible y hay cargas pendientes, solicitar la siguiente de forma asíncrona
+    if (!IpcChunkLoader::isBusy() && pendingLoadCount > 0) {
         pendingLoadCount--;
         int i = pendingLoadSlots[pendingLoadCount];
 
         if (slotUsed[i]) {
             char filename[96];
             Chunk::getSaveFilenameFor(chunkPosX[i], chunkPosZ[i], seed, filename);
-            if (chunks[i]->loadFromFile(filename)) {   // etapa 1: abrir y leer. Bioma y colores se calculan despues, repartidos (abajo)
-                loadingBiome[i] = true;                 // awaitingLoad sigue en true hasta que termine
-            } else {
-                awaitingLoad[i] = false;                // sin archivo: el chunk se genera de la semilla
+            if (!IpcChunkLoader::requestChunkLoad(i, chunkPosX[i], chunkPosZ[i], filename)) {
+                awaitingLoad[i] = false;
             }
         }
     }
@@ -279,15 +332,20 @@ void ChunkManager::update(float playerX, float playerZ) {
         flushOnePendingSave();
     }
 
-    // Streaming asíncrono dinámico: en DSi (133 MHz, 16 MB) se procesan hasta 5 chunks;
-    // en DS tradicional (67 MHz, 4 MB) se restringe estrictamente a 2 chunks para streaming suave sin congelar la SD.
-    const int MAX_CONCURRENT_HEAVY_CHUNKS = Hardware::isDSi() ? 5 : 2;
+    // Procesar cola de guardado asíncrono continua en segundo plano
+    AsyncSaveManager::processQueue();
+
+    // DSi (133 MHz): ráfaga (burst generation) de hasta 8 chunks simultáneos
+    // DS original (67 MHz): restrictivo a 2 chunks para streaming suave a 30 FPS
+    const int MAX_CONCURRENT_HEAVY_CHUNKS = Chunk::isHighBudget() ? 9 : Hardware::getMaxConcurrentHeavyChunks();
+
+    const bool isDS = !Hardware::isDSi();
+    const bool slowFrame = Governor::isSlowFrame();
 
     int processedHeavy = 0;
     Chunk::beginHeavyFrame();
     Caves::beginFrame();
 
-    // Un chunk recien leido del disco termina su bioma/colores en varios cuadros (el mas cercano primero); los demas esperan su turno
     if (!Governor::skipHeavy()) {
         const int ccx = centerIndex >= 0 ? chunkPosX[centerIndex] : 0;
         const int ccz = centerIndex >= 0 ? chunkPosZ[centerIndex] : 0;
@@ -305,28 +363,54 @@ void ChunkManager::update(float playerX, float playerZ) {
         }
     }
 
-    // Primero los chunks más cercanos al jugador: al llegar a terreno nuevo, el de debajo de los pies se completa antes que los del borde
-    // de la ventana (antes se rotaba entre todos por igual y con 25 chunks el de los pies tardaba mucho)
+    // Cola en espiral ascendente priorizando el Frustum frontal en punto fijo 8.8
     int heavyOrder[CAP_CHUNKS], heavyKey[CAP_CHUNKS], heavyCount = 0;
     {
         const int ccx = centerIndex >= 0 ? chunkPosX[centerIndex] : 0;
         const int ccz = centerIndex >= 0 ? chunkPosZ[centerIndex] : 0;
+
+        const int dirX8 = (int)(lookDirX * 256.0f);
+        const int dirZ8 = (int)(lookDirZ * 256.0f);
+        const bool hasDir = (dirX8 != 0 || dirZ8 != 0);
+
         for (int i = 0; i < maxChunks; i++) {
             if (!slotUsed[i] || !needsHeavyWork(i)) continue;
-            const int ddx = chunkPosX[i] - ccx, ddz = chunkPosZ[i] - ccz;
-            const int key = ddx * ddx + ddz * ddz;
+            const int ddx = chunkPosX[i] - ccx;
+            const int ddz = chunkPosZ[i] - ccz;
+            const int distSq = ddx * ddx + ddz * ddz;
+
+            int key = distSq * 512;
+            if (hasDir && distSq > 0) {
+                int dot = ddx * dirX8 + ddz * dirZ8;
+                key -= (dot * 2);
+            }
+
             int p = heavyCount++;
-            while (p > 0 && heavyKey[p - 1] > key) { heavyKey[p] = heavyKey[p - 1]; heavyOrder[p] = heavyOrder[p - 1]; p--; }
-            heavyKey[p] = key; heavyOrder[p] = i;
+            while (p > 0 && heavyKey[p - 1] > key) {
+                heavyKey[p] = heavyKey[p - 1];
+                heavyOrder[p] = heavyOrder[p - 1];
+                p--;
+            }
+            heavyKey[p] = key;
+            heavyOrder[p] = i;
         }
     }
 
     for (int k = 0; k < heavyCount; k++) {
         int i = heavyOrder[k];
-        if (processedHeavy >= MAX_CONCURRENT_HEAVY_CHUNKS || Governor::skipHeavy()) continue;   // Governor: tras un cuadro lento se salta el trabajo pesado
+        if (processedHeavy >= MAX_CONCURRENT_HEAVY_CHUNKS || Governor::skipHeavy()) continue;
         if (!Chunk::heavyBudgetLeft()) break;
 
-        chunks[i]->update(this);
+        const int ccx = centerIndex >= 0 ? chunkPosX[centerIndex] : 0;
+        const int ccz = centerIndex >= 0 ? chunkPosZ[centerIndex] : 0;
+        const int ddx = chunkPosX[i] - ccx;
+        const int ddz = chunkPosZ[i] - ccz;
+        const int distSq = ddx * ddx + ddz * ddz;
+
+        // Perfil DS (67 MHz): Si el cuadro supera 25ms, pausar estructuras secundarias en chunks lejanos
+        bool pauseSecondary = isDS && slowFrame && (distSq > 4);
+
+        chunks[i]->update(this, pauseSecondary);
         processedHeavy++;
 
         bool isCompleteNow = chunks[i]->isGenerationComplete();
@@ -393,7 +477,7 @@ void ChunkManager::update(float playerX, float playerZ) {
         fillPending = false;
         needsRecenter = true;
     }
-    if (!needsRecenter) {
+    if (!needsRecenter && !fillPending) {
         float currentCenterX = chunkPosX[centerIndex] * WorldConfig::SIZE_X;
         float currentCenterZ = chunkPosZ[centerIndex] * WorldConfig::SIZE_Z;
         needsRecenter = fabsf(playerX - currentCenterX) > (WorldConfig::SIZE_X / 2.0f + RECENTER_MARGIN) ||
@@ -404,26 +488,45 @@ void ChunkManager::update(float playerX, float playerZ) {
         int playerChunkX = worldToChunkCoord(playerX);
         int playerChunkZ = worldToChunkCoord(playerZ);
 
-        // Calculamos las 9 posiciones objetivo (ventana 3x3, radio 1)
-        // ANTES de pedir ninguna, así ningún findOrCreateSlot
-        // individual puede expulsar un chunk que otra de las 9 va a
-        // necesitar dentro de este mismo recentrado.
+        // Si la carga inicial aún está en progreso, limitar estrictamente la ventana
+        // a 3x3 para que los 9 chunks iniciales se completen sin interrupciones
+        const int effectiveRadius = fillPending ? 1 : windowRadius;
         int targetX[CAP_CHUNKS], targetZ[CAP_CHUNKS];
         int idx = 0;
-        for (int dx = -windowRadius; dx <= windowRadius; dx++) {
-            for (int dz = -windowRadius; dz <= windowRadius; dz++) {
-                if (!cellInWindow(dx, dz, windowRadius)) continue;   // dsi: no corners
+        int activeWindowCount = 0;
+        for (int dx = -effectiveRadius; dx <= effectiveRadius; dx++) {
+            for (int dz = -effectiveRadius; dz <= effectiveRadius; dz++) {
+                if (!cellInWindow(dx, dz, effectiveRadius)) continue;   // dsi: no corners
                 targetX[idx] = playerChunkX + dx;
                 targetZ[idx] = playerChunkZ + dz;
                 idx++;
+                activeWindowCount++;
             }
         }
 
-        for (int t = 0; t < windowCount; t++) {
-            int slot = findOrCreateSlot(targetX[t], targetZ[t], targetX, targetZ, windowCount);
+        for (int t = 0; t < activeWindowCount; t++) {
+            int slot = findOrCreateSlot(targetX[t], targetZ[t], targetX, targetZ, activeWindowCount);
             if (targetX[t] == playerChunkX && targetZ[t] == playerChunkZ) {
                 centerIndex = slot;
             }
+        }
+    }
+
+    // --- THROTTLING: Máximo 1 chunk mesh rebuild por frame para no ahogar la CPU ---
+    static int s_meshRebuildCursor = 0;
+    Chunk::beginRebuildFrame();
+    for (int k = 0; k < maxChunks; k++) {
+        int idx = (s_meshRebuildCursor + k) % maxChunks;
+        if (!slotUsed[idx]) continue;
+        Chunk* c = chunks[idx];
+        if (!c || !c->isGenerationComplete()) continue;
+        if (c->isCacheRecalcPending() || c->isInitialSkyLightPending()) continue;
+
+        if (c->isDisplayListDirty()) {
+            int bandBudget = 2; // Máximo 2 bandas por frame para este único chunk
+            c->continueDisplayListRebuild(this, &bandBudget);
+            s_meshRebuildCursor = (idx + 1) % maxChunks;
+            break; // EXACTAMENTE 1 CHUNK POR FRAME
         }
     }
 }
@@ -465,6 +568,47 @@ bool ChunkManager::isGenerationComplete() const {
     return true;
 }
 
+bool ChunkManager::areSpawnChunksReady(float playerX, float playerZ) const {
+    return getSpawnChunkFailReason(playerX, playerZ) == 0;
+}
+
+int ChunkManager::getSpawnChunkFailReason(float playerX, float playerZ) const {
+    const float stepX = (float)WorldConfig::SIZE_X;
+    const float stepZ = (float)WorldConfig::SIZE_Z;
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dz = -1; dz <= 1; dz++) {
+            float tx = playerX + (float)dx * stepX;
+            float tz = playerZ + (float)dz * stepZ;
+            Chunk* c = getChunkAt(tx, tz);
+            if (!c) return 1;
+            if (!c->isGenerationComplete()) return 2;
+            if (c->isCacheRecalcPending()) return 3;
+            if (c->isInitialSkyLightPending()) return 4;
+            if (!c->hasBuiltDisplayList()) return 5;
+        }
+    }
+    return 0;
+}
+
+void ChunkManager::buildSpawnChunks(float playerX, float playerZ) {
+    const float stepX = (float)WorldConfig::SIZE_X;
+    const float stepZ = (float)WorldConfig::SIZE_Z;
+    Chunk::beginRebuildFrame();
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dz = -1; dz <= 1; dz++) {
+            float tx = playerX + (float)dx * stepX;
+            float tz = playerZ + (float)dz * stepZ;
+            Chunk* c = getChunkAt(tx, tz);
+            if (!c) continue;
+            if (c->isGenerationComplete() && !c->isCacheRecalcPending() && !c->isInitialSkyLightPending()) {
+                if (!c->hasBuiltDisplayList() || c->isDisplayListDirty()) {
+                    c->continueDisplayListRebuild(this, nullptr);
+                }
+            }
+        }
+    }
+}
+
 bool ChunkManager::isSolidAt(float x, float y, float z) const {
     Chunk* c = getChunkAt(x, z);
 
@@ -475,6 +619,11 @@ bool ChunkManager::isSolidAt(float x, float y, float z) const {
 }
 
 void ChunkManager::drawAll(float playerX, float playerY, float playerZ, float lookDirX, float lookDirY, float lookDirZ) {
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(0, Texture::textureID);
+    glColor3b(255, 255, 255);
+    glPolyFmt(POLY_ALPHA(31) | POLY_CULL_NONE | POLY_FOG | POLY_ID(1));
+
     const float CHUNK_RADIUS = 6.0f;
     const float maxDist = WorldConfig::renderDistance() + CHUNK_RADIUS;
     const float maxDistSq = maxDist * maxDist;
@@ -489,57 +638,10 @@ void ChunkManager::drawAll(float playerX, float playerY, float playerZ, float lo
     float drawDistSq[CAP_CHUNKS];
     int drawCount = 0;
 
-    // --- Frustum Culling en Punto Fijo (sin FPU de CPU ARM9) ---
-    const int eyeX16 = (int)(playerX * 16.0f);
-    const int eyeZ16 = (int)(playerZ * 16.0f);
-    const int dirX256 = (int)(lookDirX * 256.0f);
-    const int dirZ256 = (int)(lookDirZ * 256.0f);
-    const int horizMagSq = dirX256 * dirX256 + dirZ256 * dirZ256;
-    const int horizLen = sqrt32(horizMagSq);
-    const bool canCullFrustum = (horizLen >= 48); // Si mira casi vertical no descartar horizontalmente
-
-    int normDirX = 0, normDirZ = 0;
-    if (canCullFrustum) {
-        normDirX = (dirX256 << 8) / horizLen;
-        normDirZ = (dirZ256 << 8) / horizLen;
-    }
-
-    // Cono horizontal conservador de 60° (medio angulo = 60°: cos=128, sin=222 en escala 256)
-    const int FRUSTUM_CONE_COS = 128;
-    const int FRUSTUM_CONE_SIN = 222;
-    // Radio envolvente del chunk: diagonal de 16x16 es ~22.6 bloques -> radio ~11.3 bloques -> 181 en escala 16
-    // Con margen de seguridad usamos 200 (~12.5 bloques) para cero pop-in
-    const int CHUNK_RADIUS_16 = 200;
-    const int CHUNK_NEAR_LIMIT_SQ = (32 * 16) * (32 * 16); // Chunks a menos de 32 bloques nunca se descartan
-
     for (int i = 0; i < maxChunks; i++) {
         if (!slotUsed[i]) continue;
         if (!chunks[i]->isGenerationComplete()) continue;
         if (chunks[i]->isCacheRecalcPending() && !chunks[i]->hasBuiltDisplayList()) continue;
-
-        // Frustum Culling optimizado en punto fijo entero
-        if (canCullFrustum) {
-            int chunkCenterX16 = (chunkPosX[i] * WorldConfig::SIZE_X + WorldConfig::SIZE_X / 2) * 16;
-            int chunkCenterZ16 = (chunkPosZ[i] * WorldConfig::SIZE_Z + WorldConfig::SIZE_Z / 2) * 16;
-            int vx = chunkCenterX16 - eyeX16;
-            int vz = chunkCenterZ16 - eyeZ16;
-            int v2 = vx * vx + vz * vz;
-
-            // Chunks inmediatos al jugador nunca se descartan
-            if (v2 > CHUNK_NEAR_LIMIT_SQ) {
-                int d = (vx * normDirX + vz * normDirZ) >> 8;
-                if (d < -CHUNK_RADIUS_16) {
-                    continue; // CULL: Detras del plano de la camara
-                }
-                int e2 = v2 - d * d;
-                if (e2 > 0) {
-                    int e = sqrt32(e2);
-                    if (((e * FRUSTUM_CONE_COS - d * FRUSTUM_CONE_SIN) >> 8) > CHUNK_RADIUS_16) {
-                        continue; // CULL: Fuera del cono visual del frustum
-                    }
-                }
-            }
-        }
 
         float centerX = chunkPosX[i] * WorldConfig::SIZE_X;
         float centerZ = chunkPosZ[i] * WorldConfig::SIZE_Z;
@@ -582,11 +684,18 @@ void ChunkManager::drawAll(float playerX, float playerY, float playerZ, float lo
         drawDistSq[b + 1] = dist;
     }
 
-    int vertBudget = Options::get().renderQuality == 2 ? 7000 : (Options::get().renderQuality == 1 ? 11000 : 15000); // deja margen para brazo/mirilla/overlay/ítems tirados
-    int rebuildBandBudget = Governor::skipHeavy() ? 0 : 64; // 64 ya no limita en la práctica: manda el presupuesto de tiempo; 0 = Governor salta las listas este cuadro
-    Chunk::beginRebuildFrame();
+    // Resetear en hardware la bandera de overflow para garantizar que el terreno comience limpio
+    GFX_CONTROL |= GL_POLY_OVERFLOW;
+
+    // Límite estricto de polígonos por frame: máximo 2000 polígonos para evitar saturación de la GPU a 1 FPS
+    int polyBudget = (Options::get().renderQuality == 2) ? 1400 : ((Options::get().renderQuality == 1) ? 1700 : 2000);
+    int vertBudget = polyBudget * 2;
+    int rebuildBandBudget = 0;
 
     for (int k = 0; k < drawCount; k++) {
+        if (vertBudget <= 0) {
+            break;
+        }
         int i = drawOrder[k];
         chunks[i]->draw(playerX, playerY, playerZ, lookDirX, lookDirY, lookDirZ, this, &vertBudget, &rebuildBandBudget);
     }
@@ -1052,6 +1161,14 @@ void ChunkManager::removeBlockLight(float worldX, float worldY, float worldZ) co
     floodFillBlockLight(relightSeeds, relightCount);
 }
 
+int ChunkManager::countModifiedChunks() const {
+    int count = 0;
+    for (int i = 0; i < maxChunks; i++) {
+        if (slotUsed[i] && chunks[i] && chunks[i]->isModified()) count++;
+    }
+    return count;
+}
+
 int ChunkManager::saveModifiedChunks() const {
     int savedCount = 0;
 
@@ -1062,7 +1179,7 @@ int ChunkManager::saveModifiedChunks() const {
         char filename[96]; // antes 32
         chunks[i]->getSaveFilename(filename);
 
-        if (chunks[i]->saveToFile(filename)) {
+        if (chunks[i]->saveToFileAsync(filename)) {
             savedCount++;
         }
     }

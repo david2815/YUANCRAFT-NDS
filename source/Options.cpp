@@ -1,10 +1,11 @@
+#include "Hardware.h"
 #include "Options.h"
 #include <nds.h>
 #include <stdio.h>
 #include <string.h>
 
 static const char* OPTIONS_PATH = "/mcdsefiles/options.dat";
-static Options::Data s_data = { false, 0, 0, false, 0, 0, true, true, true, true, 2, false, false, false, 0, true, false, false };  // cofre de depuracion apagado, modo fast y seed random (load() ajusta el modo segun el aparato)
+static Options::Data s_data = { false, 0, 0, false, 0, 0, true, true, true, true, 2, false, false, false, 0, true, false, false, 0 };  // cofre de depuracion apagado, modo fast y seed random (load() ajusta el modo segun el aparato)
 
 Options::Data& Options::get() { return s_data; }
 
@@ -12,7 +13,7 @@ Options::Data& Options::get() { return s_data; }
 // Los archivos viejos son mas cortos: lo que falta queda en su valor por defecto.
 void Options::load() {
     s_data.debugLargeChest = false;
-    s_data.chunkMode = isDSiMode() ? 2 : 0;   // sin opcion guardada: DS normal arranca en fast, DSi en dsi
+    s_data.chunkMode = g_isDSi ? 2 : 0;   // sin opcion guardada: DS normal arranca en fast, DSi en dsi
     s_data.seedMode = 0;
     s_data.customSeedSet = false;
     s_data.customSeed = 0;
@@ -29,14 +30,15 @@ void Options::load() {
     s_data.renderQuality = 0;
     s_data.oldMobSpawnLimit = false;
     s_data.showFps = false;
+    s_data.dsiPerformanceProfile = 0;
     FILE* f = fopen(OPTIONS_PATH, "rb");
     if (!f) return;
-    unsigned char buf[25];
+    unsigned char buf[26];
     size_t n = fread(buf, 1, sizeof(buf), f);
     if (n >= 5 && memcmp(buf, "MCO1", 4) == 0) {
         s_data.debugLargeChest = (buf[4] & 1) != 0;
         if (n >= 6 && buf[5] <= 2) s_data.chunkMode = buf[5];
-        if (s_data.chunkMode == 2 && !isDSiMode()) s_data.chunkMode = 1;   // el archivo vino de una DSi: en una DS normal el modo dsi no existe, pasa a ds
+        if (s_data.chunkMode == 2 && !g_isDSi) s_data.chunkMode = 1;   // el archivo vino de una DSi: en una DS normal el modo dsi no existe, pasa a ds
         if (n >= 8) {
             s_data.seedMode = (buf[6] == 1) ? 1 : 0;
             s_data.customSeedSet = (buf[7] == 1);
@@ -57,6 +59,7 @@ void Options::load() {
         if (n >= 23) s_data.debugCoordsOnly = (buf[22] == 1);
         if (n >= 24) s_data.oldMobSpawnLimit = (buf[23] == 1);
         if (n >= 25) s_data.showFps = (buf[24] == 1);
+        if (n >= 26) s_data.dsiPerformanceProfile = (buf[25] <= 1) ? buf[25] : 0;
     }
     fclose(f);
 }
@@ -64,12 +67,12 @@ void Options::load() {
 bool Options::save() {
     FILE* f = fopen(OPTIONS_PATH, "wb");
     if (!f) return false;
-    unsigned char buf[25] = { 'M', 'C', 'O', '1', (unsigned char)(s_data.debugLargeChest ? 1 : 0), s_data.chunkMode,
+    unsigned char buf[26] = { 'M', 'C', 'O', '1', (unsigned char)(s_data.debugLargeChest ? 1 : 0), s_data.chunkMode,
                               s_data.seedMode, (unsigned char)(s_data.customSeedSet ? 1 : 0),
                               (unsigned char)(s_data.customSeed & 0xFF), (unsigned char)((s_data.customSeed >> 8) & 0xFF),
                               (unsigned char)((s_data.customSeed >> 16) & 0xFF), (unsigned char)((s_data.customSeed >> 24) & 0xFF),
                               s_data.controlMode, (unsigned char)(s_data.autoJump ? 1 : 0), (unsigned char)(s_data.clockCompassInvUpdate ? 1 : 0), (unsigned char)(s_data.particles ? 1 : 0), (unsigned char)(s_data.sound ? 1 : 0), (unsigned char)(s_data.inventoryMap ? 0 : 1), (unsigned char)(s_data.debugScreenOptions ? 1 : 0), s_data.difficulty, s_data.renderQuality, (unsigned char)(s_data.spikeLog ? 1 : 0), (unsigned char)(s_data.debugCoordsOnly ? 1 : 0), (unsigned char)(s_data.oldMobSpawnLimit ? 1 : 0),
-                              (unsigned char)(s_data.showFps ? 1 : 0) };
+                              (unsigned char)(s_data.showFps ? 1 : 0), s_data.dsiPerformanceProfile };
     const bool ok = fwrite(buf, 1, sizeof(buf), f) == sizeof(buf);
     fclose(f);
     return ok;

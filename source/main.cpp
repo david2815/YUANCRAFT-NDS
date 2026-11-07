@@ -1,5 +1,14 @@
+#include "DebugLogger.h"
+#include "HwMath.h"
+#include "Hardware.h"
+#include "DsiDebug.h"
+#include "PerformancePreset.h"
+
+bool g_isDSi = false;
+#include "AsyncSaveManager.h"
 #include "Hardware.h"
 #include <nds.h>
+#include <nds/debug.h>
 #include <stdio.h>
 #include <fat.h>
 #include <math.h>
@@ -430,17 +439,59 @@ static int computeSkylightSubtract(u32 frames) {
     return v;
 }
 
+static volatile int s_autoTestTrigger = 0;
+static bool s_autoTestActive = false;
+static int s_autoTestFramesInGame = 0;
+static volatile int s_autoTestStep = 0;
+static int s_fpsCurrent = 0;
+static int gfxOverflowCount = 0;
+static char s_autoTestResult[256] = {};
+
 int main(void) {
-    consoleDemoInit();
+    // 0. Habilitar el manejador de excepciones de hardware por defecto (BlocksDS / libnds)
+    // Atrapa fallos de alineación (Data Abort), instrucciones inválidas (Undefined) o desbordamiento de pila
+    // mostrando un volcado en pantalla roja con registros (PC, LR, SP, R0-R12) en vez de congelar la consola.
+    defaultExceptionHandler();
 
-    // Verificacion y deteccion dinamica de hardware en arranque
-    Hardware::printHardwareInfo();
+    // 1. Encendido explícito de hardware 2D y pantallas LCD (evita pantalla blanca por falta de energía en pantallas)
+    powerOn(POWER_ALL_2D);
 
-    Renderer renderer;
-    renderer.init();
-    renderer.setupProjection();
+    // 2. Activación de interrupciones VBlank requeridas para sincronización de vídeo
+    // IMPORTANTE: NO llamar a irqInit() aquí. crt0 ya ejecutó initSystem(), que configuró
+    // irqTable y fifoInit(). Llamar a irqInit() borraría el manejador de interrupciones FIFO
+    // impidiendo la comunicación con ARM7 (causa raíz del cuelgue en DSi con libfat/SDMMC).
+    irqEnable(IRQ_VBLANK);
 
-    StartupSplash::show();   // logos de Eagtek y Mojang (1 s cada uno) al arrancar, antes de cargar nada
+    // 3. Inicialización de la consola de texto en pantalla inferior con overlay de depuración en vivo
+    consoleInit(NULL, 1, BgType_Text4bpp, BgSize_T_256x256, 31, 0, false, true);
+
+    // 4. Detección básica de plataforma sin alterar reloj ni registros TWL (67 MHz NTR base)
+    g_isDSi = isDSiMode();
+
+    // Sincronización y purga de coprocesadores matemáticos (REG_DIV / REG_SQRT inactivos)
+    HwMath::sync();
+
+    // 5. Despliegue inmediato de las pantallas de inicio (logos de Eagtek y Mojang) a reloj base (67 MHz)
+    // El primer logo aparece de forma instantánea al encender la consola (sin pantallas en blanco).
+    // Los 120 cuadros (2 segundos) de los logos proporcionan la estabilización física completa
+    // de los buses de hardware, VRAM y tarjeta SD antes de realizar operaciones de disco.
+    StartupSplash::show();
+
+    // 6. Inicialización síncrona y segura del sistema de archivos FAT con canal FIFO intacto
+    bool fatOk = fatInitDefault();
+    DebugLogger::init(fatOk);
+    if (fatOk) {
+        DSI_DebugInit();
+        DSI_Log("[BOOT] Sistema FAT inicializado. DSi logging activo en sd:/mc_dsi_debug.log\n");
+    }
+
+    if (!fatOk) {
+        iprintf("[DEBUG] AVISO: SD no disponible / libfat fallo. Modo seguro en pantalla.\n");
+        DebugLogger::log("[DEBUG] AVISO: Modo seguro activado. Tarjeta SD no disponible.");
+    } else {
+        iprintf("[DEBUG] libfat inicializado correctamente.\n");
+        DebugLogger::log("[DEBUG] Sistema de archivos FAT inicializado correctamente.");
+    }
 
     u32 gameTimeTicks = 0;
     int dlMaxKB = 0;
@@ -484,7 +535,8 @@ int main(void) {
     int controlMode = 0;
     bool thirdPerson = false;     // camara en tercera persona (minibutton2), vista trasera de Beta 1.7.3
     bool paused = false;          // menu de pausa abierto (el juego sigue corriendo, solo se bloquean los controles)
-    int pauseView = 0;            // 0 = cerrado, 1 = menu de pausa, 2 = opciones (consola)
+    int pauseView = 0;            // 0 = cerrado, 1 = pausa, 2 = opciones, 3 = guardando seguro (bloqueado), 4 = guardado completo
+    bool isSavingWorld = false;      // congelamiento estricto de UI/botones durante guardado seguro
     bool saveRequested = false;   // boton Save game del menu de pausa
     bool quitRequested = false;   // boton Quit to title del menu de pausa
 
@@ -515,19 +567,20 @@ int main(void) {
     bool diagInitialized = false;
     bool selectedSlotChangedByTouch = false;
 
-    if (!fatInitDefault()) {
-        iprintf("ERROR: libfat init failed\n");
-    } else {
-        iprintf("libfat initialized\n");
-    }
     Prof::init();
-    WorldSave::ensureDirectoryStructure();
-    Options::load();
+    if (fatOk) {
+        WorldSave::ensureDirectoryStructure();
+        Options::load();
+        Controls::load();   // perfiles de controles (controlsprofile.dat)
+        WorldSave::recoverInterruptedSession();
+    }
+    Renderer renderer;
+    renderer.init();
+    renderer.setupProjection();
+
     Sound::init();   // los menus tambien suenan
-    Controls::load();   // perfiles de controles (controlsprofile.dat)
     autoJumpEnabled = Options::get().autoJump;
     controlMode = Options::get().controlMode;
-    WorldSave::recoverInterruptedSession();
 
     if (Texture::loadItemsAtlas()) {
         iprintf("Items loaded OK\n");
@@ -589,16 +642,26 @@ int main(void) {
     }
 
     StartupSplash::finish();   // todo cargado: la pantalla de abajo vuelve a la normalidad y el menu toma las dos pantallas
-    SubScreenMenu::init(WorldSave::worldSlotExists(1));
+    SubScreenMenu::init(fatOk ? WorldSave::worldSlotExists(1) : false);
     TopScreenMenu::init();
+
+    // Conmutacion de reloj a 133 MHz SOLO tras pasar la pantalla del logo y cargar el menu principal
+    if (fatOk) {
+        Hardware::initHardwareProfile();
+        Hardware::printHardwareInfo();
+        DebugLogger::log("[DEBUG] Perfil de hardware: %s @ %d MHz", Hardware::getDeviceName(), Hardware::getCpuFrequencyMHz());
+        AsyncSaveManager::init();
+        PresetManager::init();
+    }
 
     GameState state = STATE_MENU;
 
     ChunkManager* chunkManager = nullptr;
     Player* player = nullptr;
-
-    const int MAX_DROPPED_ITEMS = 48; // al morir se sueltan hasta 36 pilas del inventario de golpe
-    DroppedItem droppedItems[MAX_DROPPED_ITEMS];
+    // Instancias estáticas en Main RAM (0x02000000) fuera de DTCM para proteger el stack de 16KB y vector IRQ
+    static Player s_mainPlayer;
+    static const int MAX_DROPPED_ITEMS = 48; // al morir se sueltan hasta 36 pilas del inventario de golpe
+    static DroppedItem droppedItems[MAX_DROPPED_ITEMS];
     RedstoneEntityCtx redstoneCtx = { &player, droppedItems, MAX_DROPPED_ITEMS };
 
     unsigned int canaryBeforeInventoryPtr = 0xFEEDFACE;
@@ -608,11 +671,22 @@ int main(void) {
     unsigned int entropyCounter = 0;
     int frameCounter = 0;
     int renderFrameCounter = 0;
+    static bool s_spawnPosFound = false;
 
     auto startWorld = [&](bool loadExisting, int worldNum, const char* newName, bool useCustomSeed, unsigned int customSeed) {
+        s_spawnPosFound = false;
+        BG_PALETTE[0] = RGB15(31,0,0); // Red: Entering World Gen
+
+        register uintptr_t currentSp asm("sp");
+        if (currentSp >= 0x02FF0000 && currentSp < 0x02FF0800) {
+            DebugLogger::log("[WARNING] Stack pointer critico antes de World Gen: 0x%08X", (unsigned int)currentSp);
+        }
+
+        s_autoTestStep = 10;
         state = STATE_LOADING;
         TopScreenMenu::suspend();
         LoadingScreen::show();
+        s_autoTestStep = 15;
 
         if (loadExisting) {
             WorldSave::beginSessionLoad(worldNum);
@@ -620,6 +694,7 @@ int main(void) {
             WorldSave::beginSessionNew();
             WorldSave::writeActiveWorldName(newName);   // nombre propio (vacio = World N)
         }
+        s_autoTestStep = 20;
 
         char metaPath[80];
         WorldSave::getBaseFilePath("meta.dat", metaPath);
@@ -676,6 +751,7 @@ int main(void) {
             }
         }
 
+        DSI_Log("[WORLD] World seed generation start...\n");
         if (hasSavedWorld) {
             worldSeed = loadedMeta.seed;
         } else if (useCustomSeed) {
@@ -685,6 +761,8 @@ int main(void) {
             touchRead(&seedTouch);
             worldSeed = entropyCounter ^ (seedTouch.px * 7919) ^ (seedTouch.py * 104729);
         }
+        DSI_Log("[WORLD] World seed generated: %u (custom=%d, existing=%d)\n", worldSeed, (int)useCustomSeed, (int)hasSavedWorld);
+        printf("[WORLD] Seed: %u\n", worldSeed);
 
         int startChunkX, startChunkZ;
         findLandChunkOffset(worldSeed, startChunkX, startChunkZ);
@@ -693,9 +771,15 @@ int main(void) {
             startChunkZ = (int)floorf(loadedMeta.playerZ / (float)WorldConfig::SIZE_Z + 0.5f);
         }
         chunkManager = new ChunkManager(worldSeed, startChunkX, startChunkZ);
+        s_autoTestStep = 30;
         renderer.setupProjection(); glMatrixMode(GL_MODELVIEW);   // la niebla y el plano lejano dependen del modo de chunks que acaba de fijar el ChunkManager
 
-        player = new Player();
+        player = &s_mainPlayer;
+        *player = Player();
+        if (!hasSavedWorld) {
+            player->x = (float)(startChunkX * WorldConfig::SIZE_X + WorldConfig::SIZE_X / 2);
+            player->z = (float)(startChunkZ * WorldConfig::SIZE_Z + WorldConfig::SIZE_Z / 2);
+        }
         inventoryOpen = false;
         craftingOpen = false;
         inventorySelectedSlot = -1;
@@ -758,6 +842,7 @@ Weather::load();
         frameCounter = 0;
         dlMaxKB = 0;
         Prof::resetMinRam();
+        s_autoTestStep = 40;
     };
 
     // Viaje por el portal (Minecraft.usePortal): x y z se dividen por 8 al ir al Nether y se multiplican por 8 al volver; la altura no
@@ -789,6 +874,7 @@ Weather::load();
 { char wolfPath[80]; WorldSave::getActiveFilePath("wolves.dat", wolfPath); HostileManager::saveWolves(wolfPath); }
 { char notePath[80]; WorldSave::getActiveFilePath("notes.dat", notePath); NoteBlocks::saveToFile(notePath); }
 
+        AsyncSaveManager::flushAll();
         delete chunkManager;
         chunkManager = nullptr;
         if (!reload) for (int i = 0; i < MAX_DROPPED_ITEMS; i++) droppedItems[i] = DroppedItem();
@@ -870,6 +956,7 @@ Weather::load();
 { char wolfPath[80]; WorldSave::getActiveFilePath("wolves.dat", wolfPath); HostileManager::saveWolves(wolfPath); }
 { char notePath[80]; WorldSave::getActiveFilePath("notes.dat", notePath); NoteBlocks::saveToFile(notePath); }
 
+        AsyncSaveManager::flushAll();
         delete chunkManager;
         chunkManager = nullptr;
         // Entity en el mundo: los objetos que soltaste al morir se quedan donde cayeron (esperan quietos hasta que su chunk se cargue). Solo se pierden los del Nether, porque se reaparece en la superficie
@@ -922,8 +1009,7 @@ Weather::load();
 { char wolfPath[80]; WorldSave::getActiveFilePath("wolves.dat", wolfPath); HostileManager::loadWolves(wolfPath); }
 { char notePath[80]; WorldSave::getActiveFilePath("notes.dat", notePath); NoteBlocks::loadFromFile(notePath); }
 
-        delete player;
-        player = new Player();       // cuerpo entero otra vez, quieto; el inventario sigue siendo el que quedó tras soltarlo todo
+        *player = Player();       // reinicializar jugador; el inventario sigue siendo el que quedó tras soltarlo todo
         healthState = HealthState(); // vida llena
         sleeping = false; sleepTimer = 0;
         deathHandled = false;
@@ -1175,17 +1261,38 @@ Weather::load();
         scanKeys();
         u32 keys_down = keysDown();
         u32 keys_held = keysHeld();
+        if (isSavingWorld) {
+            keys_down = 0;
+            keys_held = 0;
+        }
 
         // El panorama vive en el menú principal, en opciones y en la selección de mundo: en cualquier otro estado se libera (y el juego recupera su VRAM y su proyección)
         if (state != STATE_MENU && state != STATE_OPTIONS && state != STATE_WORLD_SELECT && state != STATE_CREATE_WORLD) TopScreenMenu::suspend();
 
         if (state == STATE_MENU) {
             TopScreenMenu::tick();
+            if (s_autoTestTrigger != 0) {
+                int cm = (s_autoTestTrigger >> 8) & 0xFF;
+                int rq = (s_autoTestTrigger >> 16) & 0xFF;
+                int dsiPerf = (s_autoTestTrigger >> 24) & 0xFF;
+                s_autoTestTrigger = 0;
+                Options::get().chunkMode = (u8)cm;
+                Options::get().renderQuality = (u8)rq;
+                Options::get().dsiPerformanceProfile = (u8)dsiPerf;
+                PresetManager::init();
+                s_autoTestActive = true;
+                s_autoTestFramesInGame = 0;
+                Options::get().showFps = true;
+                DebugLogger::log("[AUTOTEST] Iniciando mundo: chunk=%d, rq=%d, dsiPerf=%d", cm, rq, dsiPerf);
+                startWorld(false, 0, "AutoTestWorld", false, 0);
+                continue;
+            }
             touchPosition menuTouch;
             touchRead(&menuTouch);
             bool menuTouching = (keys_down & KEY_TOUCH) != 0;
+            bool startPressed = (keys_down & (KEY_START | KEY_A)) != 0;
 
-            if (menuTouching && SubScreenMenu::isNewLoadTouched(menuTouch.px, menuTouch.py)) {
+            if ((menuTouching && SubScreenMenu::isNewLoadTouched(menuTouch.px, menuTouch.py)) || startPressed) {
                 Sound::uiClick();
                 state = STATE_WORLD_SELECT;
                 WorldSelectMenu::init();
@@ -1215,8 +1322,24 @@ Weather::load();
         if (state == STATE_WORLD_SELECT) {
             TopScreenMenu::tick();
             bool wsTouchDown = (keys_down & KEY_TOUCH) != 0;
+            bool startPressed = (keys_down & (KEY_START | KEY_A)) != 0;
+            bool backPressed = (keys_down & KEY_B) != 0;
 
-            if (wsTouchDown) {
+            if (backPressed) {
+                Sound::uiClick();
+                state = STATE_MENU;
+                SubScreenMenu::init(WorldSave::worldSlotExists(1));
+                TopScreenMenu::init();
+            } else if (startPressed) {
+                Sound::uiClick();
+                int selected = WorldSelectMenu::getSelectedWorldNum();
+                if (selected > 0) {
+                    startWorld(true, selected, nullptr, false, 0);
+                } else {
+                    state = STATE_CREATE_WORLD;
+                    NewWorldMenu::open();
+                }
+            } else if (wsTouchDown) {
                 touchPosition wsTouch;
                 touchRead(&wsTouch);
 
@@ -1272,109 +1395,155 @@ Weather::load();
         }
 
         if (state == STATE_LOADING) {
+            static int loadingFrames = 0;
+            loadingFrames++;
+            s_autoTestStep = 1000 + loadingFrames;
+            // Estabilidad del bucle de UI durante la transición: mantener activa la tasa de refresco y registros GPU
+            scanKeys();
+            swiWaitForVBlank();
+
+            if (s_autoTestActive) {
+                int usedCount = 0, compCount = 0;
+                for (int i = 0; i < chunkManager->chunkCount(); i++) {
+                    if (chunkManager->isSlotUsed(i)) {
+                        usedCount++;
+                        if (chunkManager->isSlotComplete(i)) compCount++;
+                    }
+                }
+                snprintf(s_autoTestResult, sizeof(s_autoTestResult),
+                         "Load f%d: %d/%d done, fillP=%d",
+                         loadingFrames, compCount, usedCount, (int)chunkManager->getFillPending());
+            }
             Governor::setEnabled(false);       // cargando: lo que importa es terminar
-            Chunk::setBudgetPercent(100);
+            Chunk::setBudgetPercent(400);
             chunkManager->update(player->x, player->z);
 
-            if (chunkManager->isGenerationComplete()) {
-                if (arrivalPending) {
-                    // Llegada por un portal (Teleporter): el portal más cercano en los chunks cargados o, si no hay, uno nuevo
-                    arrivalPending = false;
-                    float tx, ty, tz;
-                    if (chunkManager->teleportToPortal(arrivalX, player->y, arrivalZ, (unsigned int)gameTimeTicks * 2654435761u + 12345u, tx, ty, tz)) {
-                        player->teleportTo(tx, ty, tz);
-                    } else {
-                        player->x = arrivalX;
-                        player->z = arrivalZ;
-                    }
-                } else if (reloadWorldPending) {
-                    reloadWorldPending = false; keepEntitiesOnLoad = true;   // cambio de chunk mode en partida: el jugador sigue donde estaba
-                } else if (!hasSavedWorld || respawnPending) {
-                    const bool wasRespawn = respawnPending;
-                    respawnPending = false;
-                    Chunk* center = chunkManager->getCenterChunk();
+            if (chunkManager->isInitialGenerationComplete()) {
+                BG_PALETTE[0] = RGB15(0,31,0); // Green: Noise Calculation Complete
+                s_autoTestStep = 8000;
 
-                    int spawnXi = WorldConfig::SIZE_X / 2;
-                    int spawnZi = WorldConfig::SIZE_Z / 2;
+                if (!s_spawnPosFound) {
+                    if (arrivalPending) {
+                        // Llegada por un portal (Teleporter): el portal más cercano en los chunks cargados o, si no hay, uno nuevo
+                        arrivalPending = false;
+                        float tx, ty, tz;
+                        if (chunkManager->teleportToPortal(arrivalX, player->y, arrivalZ, (unsigned int)gameTimeTicks * 2654435761u + 12345u, tx, ty, tz)) {
+                            player->teleportTo(tx, ty, tz);
+                        } else {
+                            player->x = arrivalX;
+                            player->z = arrivalZ;
+                        }
+                    } else if (reloadWorldPending) {
+                        reloadWorldPending = false; keepEntitiesOnLoad = true;   // cambio de chunk mode en partida: el jugador sigue donde estaba
+                    } else if (!hasSavedWorld || respawnPending) {
+                        const bool wasRespawn = respawnPending;
+                        respawnPending = false;
+                        Chunk* center = chunkManager->getCenterChunk();
 
-                    float centerWorldX = center->gridToWorldX(spawnXi);
-                    float centerWorldZ = center->gridToWorldZ(spawnZi);
+                        int spawnXi = WorldConfig::SIZE_X / 2;
+                        int spawnZi = WorldConfig::SIZE_Z / 2;
 
-                    auto isRealLand = [&](float testX, float testZ) -> bool {
-                        if (chunkManager->getBiomeAt(testX, testZ) == BiomeType::OCEAN) return false;
+                        float centerWorldX = center->gridToWorldX(spawnXi);
+                        float centerWorldZ = center->gridToWorldZ(spawnZi);
 
-                        Chunk* c = chunkManager->getChunkAt(testX, testZ);
-                        if (!c) return false;
+                        auto isRealLand = [&](float testX, float testZ) -> bool {
+                            if (chunkManager->getBiomeAt(testX, testZ) == BiomeType::OCEAN) return false;
 
-                        int cxi, cyi, czi;
-                        float probeY = c->gridToWorldY(0);
-                        if (!c->worldToGrid(testX, probeY, testZ, cxi, cyi, czi)) return false;
+                            Chunk* c = chunkManager->getChunkAt(testX, testZ);
+                            if (!c) return false;
 
-                        int highestY = c->getHighestSolidY(cxi, czi);
-                        if (highestY < 0) return false;
+                            int cxi, cyi, czi;
+                            float probeY = c->gridToWorldY(0);
+                            if (!c->worldToGrid(testX, probeY, testZ, cxi, cyi, czi)) return false;
 
-                        BlockType surfaceType = c->getBlockType(cxi, highestY, czi);
-                        return !isLiquidBlock(surfaceType);
-                    };
+                            int highestY = c->getHighestSolidY(cxi, czi);
+                            if (highestY < 0) return false;
 
-                    bool foundLand = false;
-                    float foundWorldX = centerWorldX;
-                    float foundWorldZ = centerWorldZ;
+                            BlockType surfaceType = c->getBlockType(cxi, highestY, czi);
+                            return !isLiquidBlock(surfaceType);
+                        };
 
-                    if (isRealLand(centerWorldX, centerWorldZ)) {
-                        foundLand = true;
-                    } else {
-                        const int SEARCH_RADIUS_BLOCKS = 10;
-                        for (int radius = 1; radius <= SEARCH_RADIUS_BLOCKS && !foundLand; radius++) {
-                            for (int dx = -radius; dx <= radius && !foundLand; dx++) {
-                                for (int dz = -radius; dz <= radius && !foundLand; dz++) {
-                                    float testWorldX = centerWorldX + dx;
-                                    float testWorldZ = centerWorldZ + dz;
+                        bool foundLand = false;
+                        float foundWorldX = centerWorldX;
+                        float foundWorldZ = centerWorldZ;
 
-                                    if (isRealLand(testWorldX, testWorldZ)) {
-                                        foundWorldX = testWorldX;
-                                        foundWorldZ = testWorldZ;
-                                        foundLand = true;
+                        if (isRealLand(centerWorldX, centerWorldZ)) {
+                            foundLand = true;
+                        } else {
+                            const int SEARCH_RADIUS_BLOCKS = 10;
+                            for (int radius = 1; radius <= SEARCH_RADIUS_BLOCKS && !foundLand; radius++) {
+                                for (int dx = -radius; dx <= radius && !foundLand; dx++) {
+                                    for (int dz = -radius; dz <= radius && !foundLand; dz++) {
+                                        float testWorldX = centerWorldX + dx;
+                                        float testWorldZ = centerWorldZ + dz;
+
+                                        if (isRealLand(testWorldX, testWorldZ)) {
+                                            foundWorldX = testWorldX;
+                                            foundWorldZ = testWorldZ;
+                                            foundLand = true;
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    Chunk* spawnChunk = chunkManager->getChunkAt(foundWorldX, foundWorldZ);
-                    if (spawnChunk) {
-                        int sxi, syi, szi;
-                        float probeY = spawnChunk->gridToWorldY(0);
-                        if (spawnChunk->worldToGrid(foundWorldX, probeY, foundWorldZ, sxi, syi, szi)) {
-                            int highestY = spawnChunk->getHighestSolidY(sxi, szi);
-                            if (highestY >= 0) {
-                                float spawnWorldY = spawnChunk->gridToWorldY(highestY);
-                                player->y = spawnWorldY + 0.5f + 1.62f;
-                                player->x = foundWorldX;
-                                player->z = foundWorldZ;
+                        Chunk* spawnChunk = chunkManager->getChunkAt(foundWorldX, foundWorldZ);
+                        if (spawnChunk) {
+                            int sxi, syi, szi;
+                            float probeY = spawnChunk->gridToWorldY(0);
+                            if (spawnChunk->worldToGrid(foundWorldX, probeY, foundWorldZ, sxi, syi, szi)) {
+                                int highestY = spawnChunk->getHighestSolidY(sxi, szi);
+                                if (highestY >= 0) {
+                                    float spawnWorldY = spawnChunk->gridToWorldY(highestY);
+                                    player->y = spawnWorldY + 0.5f + 1.62f;
+                                    player->x = foundWorldX;
+                                    player->z = foundWorldZ;
+                                }
+                            }
+                        }
+                        if (!wasRespawn) { worldSpawnX = player->x; worldSpawnZ = player->z; worldSpawnSet = true; }   // mundo nuevo: la brujula apunta aqui
+                        if (!wasRespawn && Options::get().debugLargeChest) placeDebugChests();
+
+                        if (wasRespawn && respawnAtBed) {
+                            // Minecraft.respawn + EntityPlayer.func_25060_a: junto a la cama si sigue en pie y tiene un sitio libre al lado; si no, al punto del mundo
+                            respawnAtBed = false;
+                            int ox, oy, oz;
+                            if (typeAtCell(bedSpawnGx, bedSpawnGy, bedSpawnGz) == BlockType::BED_BLOCK &&
+                                Sleeping::nearestEmpty(typeAtCell, bedSpawnGx, bedSpawnGy, bedSpawnGz, metaAtCell(bedSpawnGx, bedSpawnGy, bedSpawnGz) & 3, ox, oy, oz)) {
+                                float bx, by, bz;
+                                Sleeping::standingEye(ox, oy, oz, bx, by, bz);
+                                player->teleportTo(bx, by, bz);
+                            } else {
+                                bedSpawnSet = false;   // la cama ya no esta (tile.bed.notValid): se vuelve a cargar para aparecer en el punto del mundo
+                                respawnPlayer();
+                                continue;
                             }
                         }
                     }
-                    if (!wasRespawn) { worldSpawnX = player->x; worldSpawnZ = player->z; worldSpawnSet = true; }   // mundo nuevo: la brujula apunta aqui
-                    if (!wasRespawn && Options::get().debugLargeChest) placeDebugChests();
-
-                    if (wasRespawn && respawnAtBed) {
-                        // Minecraft.respawn + EntityPlayer.func_25060_a: junto a la cama si sigue en pie y tiene un sitio libre al lado; si no, al punto del mundo
-                        respawnAtBed = false;
-                        int ox, oy, oz;
-                        if (typeAtCell(bedSpawnGx, bedSpawnGy, bedSpawnGz) == BlockType::BED_BLOCK &&
-                            Sleeping::nearestEmpty(typeAtCell, bedSpawnGx, bedSpawnGy, bedSpawnGz, metaAtCell(bedSpawnGx, bedSpawnGy, bedSpawnGz) & 3, ox, oy, oz)) {
-                            float bx, by, bz;
-                            Sleeping::standingEye(ox, oy, oz, bx, by, bz);
-                            player->teleportTo(bx, by, bz);
-                        } else {
-                            bedSpawnSet = false;   // la cama ya no esta (tile.bed.notValid): se vuelve a cargar para aparecer en el punto del mundo
-                            respawnPlayer();
-                            continue;
-                        }
-                    }
+                    chunkManager->forceFullRecalculation();
+                    s_spawnPosFound = true;
+                    DSI_Log("[SPAWN] Player spawn coordinate validated: (%.2f, %.2f, %.2f)\n", player->x, player->y, player->z);
+                    printf("[SPAWN] (%.1f, %.1f, %.1f)\n", player->x, player->y, player->z);
                 }
-		chunkManager->forceFullRecalculation();
+
+                // Requirement 5: Ensure rendering is suppressed or held in a loading state until the initial 3x3 chunks
+                // surrounding spawn coordinates (player_x, player_z) are fully calculated and stored in RAM.
+                int spawnFailReason = chunkManager->getSpawnChunkFailReason(player->x, player->z);
+                if (spawnFailReason != 0) {
+                    if (s_autoTestActive) {
+                        snprintf(s_autoTestResult, sizeof(s_autoTestResult),
+                                 "SpawnWait f%d: reason=%d, pos=(%.1f,%.1f)",
+                                 loadingFrames, spawnFailReason, player->x, player->z);
+                    }
+                    chunkManager->buildSpawnChunks(player->x, player->z);
+                    chunkManager->update(player->x, player->z);
+                    swiWaitForVBlank();
+                    continue;
+                }
+
+                s_spawnPosFound = false;
+                DSI_Log("[SPAWN] All 3x3 chunks surrounding spawn 100%% ready in RAM! Entering STATE_PLAYING...\n");
+                printf("[READY] Entering world...\n");
         if (!keepEntitiesOnLoad) SheepManager::clear((unsigned int)chunkManager->getSeed() ^ (unsigned int)gameTimeTicks);   // sin ovejas al entrar; aparecen solas
         keepEntitiesOnLoad = false;
         Pistons::reset();
@@ -1383,11 +1552,24 @@ Weather::load();
         Redstone::setMinecartEnumerator(redstoneEnumerateMinecarts, nullptr);
         SheepManager::setActive(currentDimension == 0);                                            // ninguna en el Nether
 
+                nocashMessage("STATE: transition to STATE_PLAYING");
+                Chunk::setBudgetPercent(100);
+                Governor::setEnabled(true);
                 state = STATE_PLAYING;
+                s_autoTestStep = 9999;
+                paused = false;
+                pauseView = 0;
+                isSavingWorld = false;
+                inventoryOpen = false;
+                craftingOpen = false;
+                furnaceOpen = false;
+                chestOpen = false;
+                sleeping = false;
+                sleepTimer = 0;
 
                 videoSetMode(MODE_0_3D);
-                if (consoleVisible) { consoleDemoInit(); } else { HotbarIcons::render(*inventory, selectedSlot); } // antes: GameplayHotbar::show();
-                consoleVisible = false;;
+                if (consoleVisible) { consoleDemoInit(); } else { HotbarIcons::render(*inventory, selectedSlot); }
+                consoleVisible = false;
             }
 
             swiWaitForVBlank();
@@ -1435,6 +1617,7 @@ Weather::load();
             const bool closeNow = paused && pauseView == 1 && (keys_down & KEY_START);
             auto closePause = [&]() {
                 paused = false; pauseView = 0;
+                isSavingWorld = false;
                 if (consoleVisible) { consoleDemoInit(); }
                 else {
                     GameplayHotbar::invalidate();   // la imagen de pausa es de 8 bits: render() vuelve a crear el fondo de la hotbar (16 bits) sin tocar la pantalla de arriba
@@ -1456,16 +1639,60 @@ Weather::load();
                 if (pb != PauseScreen::BTN_NONE) Sound::uiClick();
                 if (pb == PauseScreen::BTN_BACK) closePause();
                 else if (pb == PauseScreen::BTN_OPTIONS) { pauseView = 2; chunkModeAtOptions = Options::get().chunkMode; SettingsMenu::open(); }
-                else if (pb == PauseScreen::BTN_SAVE) saveRequested = true;
+                else if (pb == PauseScreen::BTN_SAVE) {
+                    // Iniciar guardado seguro a prueba de fallos: bloqueo estricto de entradas
+                    isSavingWorld = true;
+                    pauseView = 3;
+                    int modChunks = chunkManager ? chunkManager->countModifiedChunks() : 0;
+                    AsyncSaveManager::startSaveSession(modChunks);
+                    consoleDemoInit();
+                    PauseScreen::showSavingProgress(AsyncSaveManager::getProgressPercent(), AsyncSaveManager::getCompletedTasks(), AsyncSaveManager::getTotalTasks());
+                    saveRequested = true; // ejecuta la serializacion en este frame
+                }
                 else if (pb == PauseScreen::BTN_QUIT) quitRequested = true;
             } else if (paused && pauseView == 2) {
+                // Menu de opciones en pausa: inputs libres y ceder ciclo con swiWaitForVBlank para evitar deadlock/congelamiento
                 if (SettingsMenu::update(keys_down)) {
                     autoJumpEnabled = Options::get().autoJump;
                     controlMode = Options::get().controlMode;
-                    if (Options::get().chunkMode != chunkModeAtOptions) reloadChunkModeRequested = true;   // se aplica al instante: se recarga el mundo con el modo nuevo
+                    if (Options::get().chunkMode != chunkModeAtOptions) {
+                        int r = (Options::get().chunkMode == 0) ? 1 : ((Options::get().chunkMode == 1) ? 2 : 3);
+                        chunkManager->setWindowRadius(r);
+                    }
                     pauseView = 1;
                     PauseScreen::show();
                 }
+                swiWaitForVBlank();
+                continue;
+            } else if (paused && pauseView == 3) {
+                // Estado de guardado seguro bloqueado: se procesa el volcado asincrono
+                AsyncSaveManager::processQueue();
+                PauseScreen::showSavingProgress(AsyncSaveManager::getProgressPercent(), AsyncSaveManager::getCompletedTasks(), AsyncSaveManager::getTotalTasks());
+                if (AsyncSaveManager::isSavingComplete()) {
+                    isSavingWorld = false; // Desbloqueo estricto unicamente tras completarse con exito
+                    pauseView = 4;
+                    PauseScreen::showSaveComplete();
+                }
+                swiWaitForVBlank();
+                continue;
+            } else if (paused && pauseView == 4) {
+                // Estado post-guardado desbloqueado: el usuario elige continuar o salir
+                bool doContinue = (keys_down & KEY_A);
+                bool doQuit = (keys_down & KEY_B);
+                if (keys_down & KEY_TOUCH) {
+                    PauseScreen::Button cb = PauseScreen::touchedSaveComplete(pTouch.px, pTouch.py);
+                    if (cb == PauseScreen::BTN_CONTINUE) doContinue = true;
+                    else if (cb == PauseScreen::BTN_QUIT) doQuit = true;
+                }
+                if (doContinue) {
+                    Sound::uiClick();
+                    closePause();
+                } else if (doQuit) {
+                    Sound::uiClick();
+                    quitRequested = true;
+                }
+                swiWaitForVBlank();
+                continue;
             }
         }
         if (reloadChunkModeRequested && !quitRequested && !titleMenuRequested) {
@@ -1476,17 +1703,32 @@ Weather::load();
         }
         if (quitRequested || titleMenuRequested) {
             quitRequested = false; paused = false; pauseView = 0;
+            isSavingWorld = false;
             Prof::flushSpikes();   // se guardan los picos anotados antes de salir
             state = STATE_MENU;
 
             WorldSave::endSession();
 
+            AsyncSaveManager::flushAll();
+            AsyncSaveManager::resetSaveSession();
             delete chunkManager;
-            delete player;
             delete inventory;
             chunkManager = nullptr;
             player = nullptr;
             inventory = nullptr;
+            GameplayHotbar::invalidate();
+
+            Furnace::clearAll();
+            ChestStore::clearAll();
+            MinecartManager::clear();
+            BoatManager::clear(); Maps::reset(); Weather::reset(); Spawners::clear(); Clouds::reset(); Particles::clear();
+            PaintingManager::clear();
+            SignManager::clear();
+            HostileManager::clearWolves();
+            TntManager::clear();
+            Projectiles::clear(); FishingHook::clear();
+            Dispenser::clearQueue();
+            NoteBlocks::clearAll();
 
             SubScreenMenu::init(WorldSave::worldSlotExists(1));
             TopScreenMenu::init();
@@ -1496,7 +1738,17 @@ Weather::load();
 
         Governor::setEnabled(true);
         Chunk::setBudgetPercent(Governor::budgetPercent());   // si el cuadro anterior se pasó, los presupuestos se recortan
-        { PROF(Prof::UPDATE); chunkManager->update(player->x, player->z); }
+        float ldx = 0.0f, ldy = 0.0f, ldz = 0.0f;
+        player->getLookDirection(ldx, ldy, ldz);
+        { PROF(Prof::UPDATE); chunkManager->update(player->x, player->z, ldx, ldz); }
+        AsyncSaveManager::processQueue();
+
+        // Muestreo de hardware estricto: scanKeys() ejecutado inmediatamente previo a touchRead()
+        scanKeys();
+        if (!isSavingWorld) {
+            keys_held = keysHeld();
+            keys_down = keysDown();
+        }
 
         touchPosition touchXY;
         touchRead(&touchXY);
@@ -1592,6 +1844,35 @@ Weather::load();
             }
         }
         btn2WasTouched = btn2Touched;
+
+        if (s_autoTestActive) {
+            s_autoTestFramesInGame++;
+            if (s_autoTestFramesInGame <= 60) {
+                keys_held |= KEY_UP;
+            } else if (s_autoTestFramesInGame <= 120) {
+                keys_held |= KEY_UP | KEY_A;
+                player->yaw += 1.5f;
+            } else if (s_autoTestFramesInGame <= 180) {
+                keys_held |= KEY_RIGHT;
+                player->pitch -= 0.5f;
+            }
+            if (s_autoTestFramesInGame == 240) {
+                snprintf(s_autoTestResult, sizeof(s_autoTestResult),
+                         "SUCCESS: 240 frames rendered! FPS=%d, Pos=(%.2f, %.2f, %.2f), GfxOverflows=%d, ChunkMode=%d, Quality=%d, DSiPerf=%d",
+                         s_fpsCurrent, player->x, player->y, player->z, gfxOverflowCount,
+                         Options::get().chunkMode, Options::get().renderQuality, Options::get().dsiPerformanceProfile);
+                FILE* rf = fopen("/mcdsefiles/autotest_result.txt", "w");
+                if (!rf) rf = fopen("autotest_result.txt", "w");
+                if (!rf) rf = fopen("fat:/mcdsefiles/autotest_result.txt", "w");
+                if (!rf) rf = fopen("fat:/autotest_result.txt", "w");
+                if (rf) {
+                    fputs(s_autoTestResult, rf);
+                    fputc('\n', rf);
+                    fclose(rf);
+                }
+                DebugLogger::log("[AUTOTEST] %s", s_autoTestResult);
+            }
+        }
 
 	const bool uiBlockingBase = inventoryOpen || craftingOpen || paused || healthState.dead; // muerto: sin controles
 	bool uiBlocking = uiBlockingBase || sleeping;   // dormido tampoco se actua; mirar, agacharse y la tercera persona quedan libres (para ver al jugador tendido)
@@ -1775,7 +2056,7 @@ Weather::load();
 
         player->handleInput(Controls::gameHeld(keys_held), *chunkManager);
 
-        float partialTick = frameCounter / 3.0f;
+        float partialTick = (float)(frameCounter % 3) / 3.0f;
 
         float bobX, bobY, bobRoll;
         player->getViewBob(partialTick, bobX, bobY, bobRoll);
@@ -1807,15 +2088,17 @@ Weather::load();
                 glTranslatef(0.0f, -0.42f, 0.0f);
                 glTranslatef(-rx, -ry, -rz);
             } else {
+                float camYaw, camPitch;
+                player->getRenderAngles(partialTick, camYaw, camPitch);
                 if (healthState.dead) {   // muerto: la camara queda quieta donde moriste (sin balanceo, ni caida, ni seguir al cuerpo)
-                    glRotatef(-player->pitch, 1.0f, 0.0f, 0.0f);
-                    glRotatef(-player->yaw, 0.0f, 1.0f, 0.0f);
+                    glRotatef(-camPitch, 1.0f, 0.0f, 0.0f);
+                    glRotatef(-camYaw, 0.0f, 1.0f, 0.0f);
                     glTranslatef(-deathCamX, -deathCamY, -deathCamZ);
                 } else {
                 HandAnimations::applyWorldViewBobbing(partialTick);
                 if (thirdPerson) glTranslatef(0.0f, 0.0f, -player->thirdPersonDistance(*chunkManager, rx, ry - player->getEyeDrop(partialTick), rz));   // la camara se aleja detras de los ojos
-                glRotatef(-player->pitch, 1.0f, 0.0f, 0.0f);
-                glRotatef(-player->yaw, 0.0f, 1.0f, 0.0f);
+                glRotatef(-camPitch, 1.0f, 0.0f, 0.0f);
+                glRotatef(-camYaw, 0.0f, 1.0f, 0.0f);
                 glTranslatef(-rx, -(ry - player->getEyeDrop(partialTick)), -rz);
                 }
             }
@@ -1827,7 +2110,7 @@ Weather::load();
         }
 
         float dirX, dirY, dirZ;
-        player->getLookDirection(dirX, dirY, dirZ);
+        player->getRenderLookDirection(partialTick, dirX, dirY, dirZ);
 
         const float eyeCastY = player->y - player->getEyeDrop(1.0f);   // agachado, los ojos bajan
         RaycastHit hit = Raycaster::cast(*chunkManager, player->x, eyeCastY, player->z,
@@ -2328,11 +2611,13 @@ Weather::load();
 	}
 
         float lookDirX, lookDirY, lookDirZ;
-        player->getLookDirection(lookDirX, lookDirY, lookDirZ);
+        player->getRenderLookDirection(partialTick, lookDirX, lookDirY, lookDirZ);
 
-        frameCounter++;
+        const int tickStep = (PresetManager::getTargetFpsLock() == 30) ? 2 : 1;
+        frameCounter += tickStep;
         renderFrameCounter++;
-        bool shouldRender = (renderFrameCounter % 3) == 0;
+        // Target de FPS configurable según el preset de rendimiento activo (30 o 60 FPS por V-Blank)
+        bool shouldRender = true;
 
         gameTimeTicks = (gameTimeTicks + 1) % CYCLE_TICKS;
         int skylightStep = computeSkylightSubtract(gameTimeTicks);
@@ -2359,6 +2644,10 @@ Weather::load();
         glFogColor(skyR, skyG, skyB, 31);
 
 	if (shouldRender) {
+            // Sincronizar registros matemáticos antes de cada renderizado
+            HwMath::sync();
+            glMatrixMode(GL_MODELVIEW);
+
             // La mano va PRIMERO — así nunca se pierde aunque el terreno
             // sature el presupuesto de polígonos del frame (la GPU descarta
             // en silencio lo que venga DESPUÉS del límite, no lo que ya se mandó).
@@ -2404,7 +2693,25 @@ Weather::load();
         glPopMatrix(1);
             }
 
+            glMatrixMode(GL_MODELVIEW);
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(0, Texture::textureID);
+            glColor3b(255, 255, 255);
+            glPolyFmt(POLY_ALPHA(31) | POLY_CULL_NONE | POLY_FOG | POLY_ID(1));
+            nocashMessage("RENDER: drawAll start");
             { PROF(Prof::DRAW_ALL); chunkManager->drawAll(player->x, player->y, player->z, lookDirX, lookDirY, lookDirZ); }
+            nocashMessage("RENDER: drawAll done");
+            while (DMA_CR(0) & DMA_BUSY); // Asegurar que la última banda por DMA concluyó
+            glMatrixMode(GL_MODELVIEW);
+
+            // Verificación y saneamiento del stack de matrices ante posibles desbordamientos
+            if (GFX_STATUS & BIT(15)) {
+                glResetMatrixStack();
+                renderer.setupProjection();
+                glMatrixMode(GL_MODELVIEW);
+                player->applyCamera(partialTick, 0.0f);
+            }
+
             const u32 entsStartTicks = Prof::now();   // lo que se dibuja despues del terreno (mobs, objetos, particulas, clima, HUD...)
 
             if (breakHeld && hit.hit && miningChunk != nullptr && miningDamage > 0.0f) { // sin grietas en la bedrock (su fuerza es 0)
@@ -2427,7 +2734,9 @@ Weather::load();
             PaintingManager::draw(*chunkManager, player->x, player->y, player->z);
             SignManager::draw(*chunkManager, player->x, player->y, player->z);
             TntManager::draw(*chunkManager, player->x, player->y, player->z, partialTick);
-            Particles::draw(*chunkManager, player->x, player->y, player->z, player->yaw, player->pitch);
+            if (PresetManager::areParticlesEnabled()) {
+                Particles::draw(*chunkManager, player->x, player->y, player->z, player->yaw, player->pitch);
+            }
             if (currentDimension == 0) Clouds::draw(partialTick, player->x, player->y, player->z, computeSkyBrightness(gameTimeTicks), Weather::rain(partialTick), Weather::thunder(partialTick), WorldConfig::viewRadius() >= 3);
             if (currentDimension == 0 && WorldConfig::viewRadius() >= 2) Sky::draw(player->x, player->y, player->z, computeCelestialAngle(gameTimeTicks), Weather::rain(partialTick), skyR, skyG, skyB);   // sol, luna y resplandor: solo en ds y dsi
             if (currentDimension == 0) Weather::draw(partialTick, player->x, player->y, player->z, player->yaw, computeSkyBrightness(gameTimeTicks));
@@ -2465,12 +2774,22 @@ Weather::load();
             if (sleepTimer > 0) drawSleepOverlay(Sleeping::overlayAmount(sleepTimer, partialTick) * (thirdPerson ? 0.4f : 1.0f));   // GuiIngame: el velo oscuro al dormir y al despertar (en tercera persona mas claro, para ver al jugador tendido)
             if (timeInPortal > 0.0f) drawPortalOverlay(timeInPortal);
 
+            glMatrixMode(GL_MODELVIEW);
+            GFX_CONTROL |= GL_POLY_OVERFLOW | GL_COLOR_UNDERFLOW;
+
             Prof::add(Prof::ENTS, Prof::now() - entsStartTicks);
+            nocashMessage("RENDER: glFlush start");
             glFlush(0);
+            nocashMessage("RENDER: glFlush done");
+            static bool s_firstFrameColorDrawn = false;
+            if (!s_firstFrameColorDrawn) {
+                BG_PALETTE[0] = RGB15(0,31,31); // Cyan: First Frame Render Completed
+                s_firstFrameColorDrawn = true;
+            }
         }
 
 	// --- Diagnóstico de límites de la GPU (visible con el toggle de consola, tecla X) ---
-        static int gfxOverflowCount = 0;
+        
         static int gfxUnderflowCount = 0;
         if (GFX_CONTROL & GL_POLY_OVERFLOW)   gfxOverflowCount++;
         if (GFX_CONTROL & GL_COLOR_UNDERFLOW) gfxUnderflowCount++;
@@ -2536,7 +2855,7 @@ Weather::load();
         // --- Medicion y visualizacion de FPS en tiempo real (cero costo CPU) ---
         static u32 s_fpsLastTime = 0;
         static int s_fpsFrameAccum = 0;
-        static int s_fpsCurrent = 0;
+        
         static bool s_fpsWasDrawn = false;
 
         s_fpsFrameAccum++;
@@ -2594,29 +2913,21 @@ Weather::load();
         }
 
         {
-            // Ritmo del juego: el motor dibuja 1 de cada 3 cuadros y hace un tick cada 3. Si el cuadro que dibuja se pasa de 16,7 ms, el
-            // swiWaitForVBlank lo redondea a 2 vblanks y el tick completo dura 4 en vez de 3 (el juego va al 75 %). Esa demora se anota como deuda y los
-            // cuadros siguientes (que no dibujan) se saltan la espera hasta saldarla: el tick vuelve a durar 50 ms mientras el promedio alcance.
-            static u32 s_lagTicks = 0;
-            const u32 FRAME_TICKS = 560190;   // 33513982 / 59,8261 Hz
-            const u32 work = Prof::now() - frameStartTicks;
-            bool skipWait = false;
-            if (work >= FRAME_TICKS) {
-                s_lagTicks += ((work + FRAME_TICKS - 1) / FRAME_TICKS) * FRAME_TICKS - FRAME_TICKS;
-                if (s_lagTicks > 4 * FRAME_TICKS) s_lagTicks = 4 * FRAME_TICKS;
-            } else if (!shouldRender && s_lagTicks >= FRAME_TICKS - work) {
-                s_lagTicks -= FRAME_TICKS - work;
-                skipWait = true;
-            }
-            if (!skipWait) {
+            // Sincronización estricta de VBlank en cada frame:
+            // 60 FPS: 1 VBlank (59.82 Hz)
+            // 30 FPS: Dual-VBlank (29.91 Hz) para eliminar tearing y micro-stuttering
+            swiWaitForVBlank();
+            if (PresetManager::getTargetFpsLock() == 30) {
                 swiWaitForVBlank();
-                TextureAnim::onVBlank(); // al empezar el VBlank el 3D no dibuja: se puede escribir en la VRAM de texturas
+            }
+            if (PresetManager::areAnimatedTexturesEnabled()) {
+                TextureAnim::onVBlank();
             }
         }
 
         if (frameCounter >= 3) {
             PROF(Prof::LOGIC);
-            frameCounter = 0;
+            frameCounter -= 3;
 
             u32 keysForPhysics = uiBlocking ? 0 : Controls::gameHeld(keys_held);
             if (!uiBlocking && controlMode == 1 && touchJumpHeld) keysForPhysics |= KEY_A;   // xyba: la zona tactil tambien salta (ademas del boton que se asigne)
@@ -2708,7 +3019,10 @@ Weather::load();
                 // clima: lluvia/nieve/tormenta (solo en la superficie); el rayo daña al jugador a menos de 3 bloques (EntityLightningBolt -> onStruckByLightning: 5 de daño y fuego)
                 Clouds::tick();
                 { PROFSTEP("t weather"); Weather::tick(*chunkManager, player->x, player->y, player->z, currentDimension == 0); }
-                { PROFSTEP("t particles"); Particles::tick(*chunkManager, player->x, player->y, player->z); }
+                if (PresetManager::areParticlesEnabled()) {
+                    PROFSTEP("t particles");
+                    Particles::tick(*chunkManager, player->x, player->y, player->z);
+                }
                 healthState.isPlayer = true; healthState.difficulty = Options::get().difficulty;
                 HostileManager::setPeaceful(Options::get().difficulty == 0);   // pacifico: sin monstruos
                 if (Options::get().difficulty == 0 && !healthState.dead && healthState.health < Health::MAX_HEALTH) {   // EntityPlayer: en pacifico regenera 1 de vida por segundo
@@ -3280,7 +3594,7 @@ Weather::load();
         if (saveRequested && !healthState.dead) {
             saveRequested = false;
             Prof::flushSpikes(); // muerto no se guarda: el mundo debe poder volver a antes de morir
-            chunkManager->saveModifiedChunks();
+            int actualSaved = chunkManager ? chunkManager->saveModifiedChunks() : 0;
 
             static WorldMetadata meta;
             meta.seed = chunkManager->getSeed();
@@ -3350,6 +3664,7 @@ Weather::load();
 { char notePath[80]; WorldSave::getActiveFilePath("notes.dat", notePath); NoteBlocks::saveToFile(notePath); }
 
             WorldSave::commitSession();
+            AsyncSaveManager::notifyAllEnqueued(actualSaved);
         }
         saveRequested = false;
     }

@@ -1,3 +1,4 @@
+#include "HwMath.h"
 #include "PartialBlocks.h"
 #include "Trees.h"
 #include "Sound.h"
@@ -532,7 +533,7 @@ bool rayVsBox(const float bd[6], const float s[3], const float e[3], BlockFace& 
             if (s[i] < bd[i] || s[i] > bd[i + 3]) return false;
             continue;
         }
-        float t1 = (bd[i] - s[i]) / d, t2 = (bd[i + 3] - s[i]) / d;
+        float t1 = HwMath::divf(bd[i] - s[i], d), t2 = HwMath::divf(bd[i + 3] - s[i], d);
         const bool pos = d > 0.0f;
         if (t1 > t2) { const float tmp = t1; t1 = t2; t2 = tmp; }
         if (t1 > tMin) { tMin = t1; axisIn = i; positiveIn = pos; }

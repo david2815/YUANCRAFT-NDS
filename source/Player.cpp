@@ -1,3 +1,4 @@
+#include "HwMath.h"
 #include "Player.h"
 #include "ChunkManager.h"
 #include <math.h>
@@ -8,6 +9,8 @@ Player::Player() {
     z = 3.0f;
     yaw = 0.0f;
     pitch = 0.0f;
+    prevTickYaw = yaw;
+    prevTickPitch = pitch;
 
     prevTickY = y;
     currentTickY = y;
@@ -17,6 +20,26 @@ Player::Player() {
     currentTickZ = z;
 }
 
+ITCM_CODE void Player::getRenderAngles(float pt, float& outYaw, float& outPitch) const {
+    float dyaw = yaw - prevTickYaw;
+    while (dyaw < -180.0f) dyaw += 360.0f;
+    while (dyaw >= 180.0f) dyaw -= 360.0f;
+    outYaw = prevTickYaw + dyaw * pt;
+    outPitch = prevTickPitch + (pitch - prevTickPitch) * pt;
+}
+
+void Player::getRenderLookDirection(float pt, float& outX, float& outY, float& outZ) const {
+    float camYaw, camPitch;
+    getRenderAngles(pt, camYaw, camPitch);
+
+    float yawRad = camYaw * (M_PI / 180.0f);
+    float pitchRad = camPitch * (M_PI / 180.0f);
+
+    outX = -sinf(yawRad) * cosf(pitchRad);
+    outY = sinf(pitchRad);
+    outZ = -cosf(yawRad) * cosf(pitchRad);
+}
+
 void Player::applyCamera(float partialTick, float bobRoll) {
     float renderX = prevTickX + (currentTickX - prevTickX) * partialTick;
     float renderY = prevTickY + (currentTickY - prevTickY) * partialTick;
@@ -24,8 +47,11 @@ void Player::applyCamera(float partialTick, float bobRoll) {
 
     lastRenderY = renderY;
 
-    float yawRad = yaw * (M_PI / 180.0f);
-    float pitchRad = pitch * (M_PI / 180.0f);
+    float camYaw, camPitch;
+    getRenderAngles(partialTick, camYaw, camPitch);
+
+    float yawRad = camYaw * (M_PI / 180.0f);
+    float pitchRad = camPitch * (M_PI / 180.0f);
 
     float lookX = renderX - sinf(yawRad) * cosf(pitchRad);
     float lookY = renderY + sinf(pitchRad);
@@ -101,7 +127,7 @@ bool Player::collidesAt(const ChunkManager& chunkManager, float testX, float tes
             float pz = testZ + cz * halfWidth;
 
             for (int s = 0; s < SAMPLES; s++) {
-                float t = (float)s / (float)(SAMPLES - 1); // 0.0 a 1.0
+                float t = HwMath::divf((float)s, (float)(SAMPLES - 1)); // 0.0 a 1.0
                 float sampleY = (testY - eyeToFeet) + t * (eyeToFeet + eyeToHead);
 
                 if (chunkManager.isSolidAt(px, sampleY, pz)) return true;
@@ -120,6 +146,8 @@ void Player::physicsTick(u32 keysHeld, const ChunkManager& chunkManager, bool au
     prevTickY = y;
     prevTickX = x;
     prevTickZ = z;
+    prevTickYaw = yaw;
+    prevTickPitch = pitch;
     prevEyeDrop = eyeDrop;
     eyeDrop += ((sneaking ? SNEAK_EYE_DROP : 0.0f) - eyeDrop) * 0.5f;
 
@@ -181,19 +209,19 @@ void Player::physicsTick(u32 keysHeld, const ChunkManager& chunkManager, bool au
     float accel = onGround ? GROUND_ACCELERATION * (0.16277136f / (groundFriction * groundFriction * groundFriction)) : AIR_ACCELERATION;
     if (inWater || inLava) accel = LIQUID_ACCELERATION;
 
-    float inputMag = sqrtf(strafeIn * strafeIn + forwardIn * forwardIn);
+    float inputMag = HwMath::sqrtf(strafeIn * strafeIn + forwardIn * forwardIn);
     if (inputMag >= 0.01f) {
         if (inputMag < 1.0f) inputMag = 1.0f;
-        float k = accel / inputMag;
+        float k = HwMath::divf(accel, inputMag);
         strafeIn *= k;
         forwardIn *= k;
         velocityX += forwardX * forwardIn + rightX * strafeIn;
         velocityZ += forwardZ * forwardIn + rightZ * strafeIn;
     }
 
-    float speed = sqrtf(velocityX * velocityX + velocityZ * velocityZ);
+    float speed = HwMath::sqrtf(velocityX * velocityX + velocityZ * velocityZ);
     if (speed > MAX_SPEED) {
-        float scale = MAX_SPEED / speed;
+        float scale = HwMath::divf(MAX_SPEED, speed);
         velocityX *= scale;
         velocityZ *= scale;
     }
@@ -215,10 +243,10 @@ void Player::physicsTick(u32 keysHeld, const ChunkManager& chunkManager, bool au
     // vertical, para que el salto sí se aplique este mismo tick) ---
     if (autoJumpEnabled && onGround && !sneaking) {
         bool movementKeyHeld = (keysHeld & (KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT)) != 0;
-        float moveSpeed = sqrtf(velocityX * velocityX + velocityZ * velocityZ);
+        float moveSpeed = HwMath::sqrtf(velocityX * velocityX + velocityZ * velocityZ);
         if (movementKeyHeld && moveSpeed > 0.001f) {
-            float dirX = velocityX / moveSpeed;
-            float dirZ = velocityZ / moveSpeed;
+            float dirX = HwMath::divf(velocityX, moveSpeed);
+            float dirZ = HwMath::divf(velocityZ, moveSpeed);
 
             const float AHEAD_DIST = 0.35f;
             float feetY = y - eyeToFeet;
@@ -352,7 +380,7 @@ void Player::physicsTick(u32 keysHeld, const ChunkManager& chunkManager, bool au
     currentTickX = x;
     currentTickZ = z;
 
-    float speed2 = sqrtf(velocityX * velocityX + velocityZ * velocityZ);
+    float speed2 = HwMath::sqrtf(velocityX * velocityX + velocityZ * velocityZ);
     bobPhase += speed2 * 2.0f;
     bobPhase = fmodf(bobPhase, 2.0f * (float)M_PI);
 
@@ -405,25 +433,50 @@ void Player::getViewBob(float partialTick, float& bobX, float& bobY, float& bobR
     if (bobRoll < -MAX_BOB_ROLL) bobRoll = -MAX_BOB_ROLL;
 }
 
-void Player::handleTouch(bool touching, int touchX, int touchY) {
+ITCM_CODE void Player::handleTouch(bool touching, int touchX, int touchY) {
     if (touching) {
+        touchLostFrames = 0;
         if (wasTouching) {
-            int dx = touchX - prevTouchX;
-            int dy = touchY - prevTouchY;
+            float rawDx = (float)(touchX - prevTouchX);
+            float rawDy = (float)(touchY - prevTouchY);
 
-            yaw -= dx * TOUCH_SENSITIVITY;
-            pitch -= dy * TOUCH_SENSITIVITY;
+            // 1. Deadzone: suprime ruido analógico/térmico del digitalizador resistivo (<= 1 px)
+            if (rawDx >= -1.0f && rawDx <= 1.0f) rawDx = 0.0f;
+            if (rawDy >= -1.0f && rawDy <= 1.0f) rawDy = 0.0f;
+
+            // 2. Filtro EMA (Exponential Moving Average) paso-bajo (ALPHA ~0.40)
+            const float ALPHA = 0.40f;
+            smoothedDx = (rawDx * ALPHA) + (smoothedDx * (1.0f - ALPHA));
+            smoothedDy = (rawDy * ALPHA) + (smoothedDy * (1.0f - ALPHA));
+
+            // 3. Rotación de cámara suave y responsiva
+            yaw -= smoothedDx * TOUCH_SENSITIVITY;
+            pitch -= smoothedDy * TOUCH_SENSITIVITY;
 
             if (yaw >= 360.0f) yaw -= 360.0f;
             if (yaw < 0.0f) yaw += 360.0f;
             if (pitch > MAX_PITCH) pitch = MAX_PITCH;
             if (pitch < -MAX_PITCH) pitch = -MAX_PITCH;
+        } else {
+            // Primer frame de toque: inicializar estado sin salto abrupto
+            smoothedDx = 0.0f;
+            smoothedDy = 0.0f;
         }
         prevTouchX = touchX;
         prevTouchY = touchY;
         wasTouching = true;
     } else {
-        wasTouching = false;
+        // Touch Debounce / Hold Guard: tolera hasta 2 frames de pérdida accidental de contacto
+        // por fluctuación de presión de los dedos en la pantalla resistiva
+        if (wasTouching) {
+            touchLostFrames++;
+            if (touchLostFrames > 2) {
+                wasTouching = false;
+                smoothedDx = 0.0f;
+                smoothedDy = 0.0f;
+                touchLostFrames = 0;
+            }
+        }
     }
 }
 
@@ -518,11 +571,11 @@ void Player::rideTo(float ex, float ey, float ez) {
 // EntityLiving.knockBack: la velocidad se reduce a la mitad, sale despedido 0,4 en sentido contrario al golpe y sube hasta 0,4
 void Player::knockBack(float attackerX, float attackerZ) {
     float dx = attackerX - x, dz = attackerZ - z;
-    float d = sqrtf(dx * dx + dz * dz);
+    float d = HwMath::sqrtf(dx * dx + dz * dz);
     if (d < 0.01f) { dx = 0.01f; dz = 0.0f; d = 0.01f; }
     velocityX /= 2.0f; velocityY /= 2.0f; velocityZ /= 2.0f;
-    velocityX -= dx / d * 0.4f;
-    velocityZ -= dz / d * 0.4f;
+    velocityX -= HwMath::divf(dx, d) * 0.4f;
+    velocityZ -= HwMath::divf(dz, d) * 0.4f;
     velocityY += 0.4f;
     if (velocityY > 0.4f) velocityY = 0.4f;
 }

@@ -36,33 +36,44 @@ void HealthHud::draw(const HealthState& s, int armorValue, bool headInWater) {
     glMultMatrix4x4(&kHudDepth);
     gluPerspective(70, 256.0 / 192.0, 0.1f, 40.0f);   // los mismos NEAR_PLANE y FAR_PLANE de Renderer.cpp
 
+    // Precalcular todas las divisiones y coordenadas ANTES de glBegin para no perturbar el FIFO de vértices
+    struct PrecomputedQuad {
+        short cx[2];
+        short cy[2];
+        int z;
+        int u0, v0, u1, v1;
+    };
+    PrecomputedQuad pq[HealthHudLayout::MAX_QUADS];
+    for (int i = 0; i < count; i++) {
+        const HudQuad& q = quads[i];
+        const int dist = Z0 - LAYER_STEP * q.layer;
+        pq[i].z = LAYER_STEP * q.layer;
+
+        int px[2] = { q.x, q.x + HealthHudLayout::ICON - EDGE_INSET };
+        int py[2] = { q.y, q.y + HealthHudLayout::ICON - EDGE_INSET };
+        for (int k = 0; k < 2; k++) {
+            int a = (px[k] - 128) * UNITS_PER_PIXEL * dist;
+            int b = (96 - py[k]) * UNITS_PER_PIXEL * dist;
+            pq[i].cx[k] = (short)((a + (a >= 0 ? Z0 / 2 : -Z0 / 2)) / Z0);
+            pq[i].cy[k] = (short)((b + (b >= 0 ? Z0 / 2 : -Z0 / 2)) / Z0);
+        }
+
+        pq[i].u0 = q.u << 4;
+        pq[i].v0 = q.v << 4;
+        pq[i].u1 = ((q.u + 9) << 4) - 1;
+        pq[i].v1 = ((q.v + 9) << 4) - 1;
+    }
+
     glMatrixMode(GL_MODELVIEW);
     glPushMatrix();
         glLoadIdentity();
         glTranslatef(0.0f, 0.0f, -(float)Z0 / 4096.0f);
         glBegin(GL_QUADS);
         for (int i = 0; i < count; i++) {
-            const HudQuad& q = quads[i];
-            const int dist = Z0 - LAYER_STEP * q.layer;  // la capa más cercana se achica para seguir cayendo en el mismo píxel
-            const int z = LAYER_STEP * q.layer;
-
-            // píxel de pantalla -> unidades de cámara (x a la derecha, y hacia arriba, centro de la pantalla en (128, 96))
-            int px[2] = { q.x, q.x + HealthHudLayout::ICON - EDGE_INSET };
-            int py[2] = { q.y, q.y + HealthHudLayout::ICON - EDGE_INSET };
-            short cx[2], cy[2];
-            for (int k = 0; k < 2; k++) {
-                int a = (px[k] - 128) * UNITS_PER_PIXEL * dist;
-                int b = (96 - py[k]) * UNITS_PER_PIXEL * dist;
-                cx[k] = (short)((a + (a >= 0 ? Z0 / 2 : -Z0 / 2)) / Z0);
-                cy[k] = (short)((b + (b >= 0 ? Z0 / 2 : -Z0 / 2)) / Z0);
-            }
-
-            // coordenadas de textura en 12.4: el borde lejano queda 1/16 de texel antes del final del ícono, para no tomar el texel de al lado
-            const int u0 = q.u << 4, v0 = q.v << 4, u1 = ((q.u + 9) << 4) - 1, v1 = ((q.v + 9) << 4) - 1;
-            GFX_TEX_COORD = TEXTURE_PACK(u0, v1); glVertex3v16(cx[0], cy[1], z);
-            GFX_TEX_COORD = TEXTURE_PACK(u1, v1); glVertex3v16(cx[1], cy[1], z);
-            GFX_TEX_COORD = TEXTURE_PACK(u1, v0); glVertex3v16(cx[1], cy[0], z);
-            GFX_TEX_COORD = TEXTURE_PACK(u0, v0); glVertex3v16(cx[0], cy[0], z);
+            GFX_TEX_COORD = TEXTURE_PACK(pq[i].u0, pq[i].v1); glVertex3v16(pq[i].cx[0], pq[i].cy[1], pq[i].z);
+            GFX_TEX_COORD = TEXTURE_PACK(pq[i].u1, pq[i].v1); glVertex3v16(pq[i].cx[1], pq[i].cy[1], pq[i].z);
+            GFX_TEX_COORD = TEXTURE_PACK(pq[i].u1, pq[i].v0); glVertex3v16(pq[i].cx[1], pq[i].cy[0], pq[i].z);
+            GFX_TEX_COORD = TEXTURE_PACK(pq[i].u0, pq[i].v0); glVertex3v16(pq[i].cx[0], pq[i].cy[0], pq[i].z);
         }
         glEnd();
     glPopMatrix(1);

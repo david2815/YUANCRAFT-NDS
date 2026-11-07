@@ -14,6 +14,7 @@ void Renderer::init() {
     glClearColor(0, 0, 20, 31);
     glClearDepth(GL_MAX_DEPTH);
     glViewport(0, 0, 255, 191);
+    glEnable(GL_FOG);
 }
 
 void Renderer::setupProjection() {
@@ -22,7 +23,7 @@ void Renderer::setupProjection() {
     const float NEAR_PLANE = 0.1f, FAR_PLANE = 40.0f;
     gluPerspective(70, 256.0 / 192.0, NEAR_PLANE, FAR_PLANE);
 
-    glPolyFmt(POLY_ALPHA(31) | POLY_CULL_NONE | POLY_FOG);
+    glPolyFmt(POLY_ALPHA(31) | POLY_CULL_NONE | POLY_FOG | POLY_ID(1));
 
     // La niebla sale de la distancia de render del modo (fast / ds / dsi): empieza a 60 % de la distancia y llega al maximo a 85 %,
     // asi el borde del mundo queda tapado en cualquier modo. La profundidad del hardware (15 bits) no es lineal: se calcula con la
@@ -48,4 +49,5 @@ void Renderer::setupProjection() {
 
     glFogColor(20, 20, 31, 31); // se sobreescribe cada frame en main.cpp según la hora
     glEnable(GL_FOG);
+    glMatrixMode(GL_MODELVIEW); // Restablecer siempre el modo de matrices a MODELVIEW para proteger la proyección
 }
