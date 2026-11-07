@@ -9,6 +9,8 @@ Player::Player() {
     z = 3.0f;
     yaw = 0.0f;
     pitch = 0.0f;
+    prevTickYaw = yaw;
+    prevTickPitch = pitch;
 
     prevTickY = y;
     currentTickY = y;
@@ -18,6 +20,26 @@ Player::Player() {
     currentTickZ = z;
 }
 
+ITCM_CODE void Player::getRenderAngles(float pt, float& outYaw, float& outPitch) const {
+    float dyaw = yaw - prevTickYaw;
+    while (dyaw < -180.0f) dyaw += 360.0f;
+    while (dyaw >= 180.0f) dyaw -= 360.0f;
+    outYaw = prevTickYaw + dyaw * pt;
+    outPitch = prevTickPitch + (pitch - prevTickPitch) * pt;
+}
+
+void Player::getRenderLookDirection(float pt, float& outX, float& outY, float& outZ) const {
+    float camYaw, camPitch;
+    getRenderAngles(pt, camYaw, camPitch);
+
+    float yawRad = camYaw * (M_PI / 180.0f);
+    float pitchRad = camPitch * (M_PI / 180.0f);
+
+    outX = -sinf(yawRad) * cosf(pitchRad);
+    outY = sinf(pitchRad);
+    outZ = -cosf(yawRad) * cosf(pitchRad);
+}
+
 void Player::applyCamera(float partialTick, float bobRoll) {
     float renderX = prevTickX + (currentTickX - prevTickX) * partialTick;
     float renderY = prevTickY + (currentTickY - prevTickY) * partialTick;
@@ -25,8 +47,11 @@ void Player::applyCamera(float partialTick, float bobRoll) {
 
     lastRenderY = renderY;
 
-    float yawRad = yaw * (M_PI / 180.0f);
-    float pitchRad = pitch * (M_PI / 180.0f);
+    float camYaw, camPitch;
+    getRenderAngles(partialTick, camYaw, camPitch);
+
+    float yawRad = camYaw * (M_PI / 180.0f);
+    float pitchRad = camPitch * (M_PI / 180.0f);
 
     float lookX = renderX - sinf(yawRad) * cosf(pitchRad);
     float lookY = renderY + sinf(pitchRad);
@@ -121,6 +146,8 @@ void Player::physicsTick(u32 keysHeld, const ChunkManager& chunkManager, bool au
     prevTickY = y;
     prevTickX = x;
     prevTickZ = z;
+    prevTickYaw = yaw;
+    prevTickPitch = pitch;
     prevEyeDrop = eyeDrop;
     eyeDrop += ((sneaking ? SNEAK_EYE_DROP : 0.0f) - eyeDrop) * 0.5f;
 
@@ -406,25 +433,50 @@ void Player::getViewBob(float partialTick, float& bobX, float& bobY, float& bobR
     if (bobRoll < -MAX_BOB_ROLL) bobRoll = -MAX_BOB_ROLL;
 }
 
-void Player::handleTouch(bool touching, int touchX, int touchY) {
+ITCM_CODE void Player::handleTouch(bool touching, int touchX, int touchY) {
     if (touching) {
+        touchLostFrames = 0;
         if (wasTouching) {
-            int dx = touchX - prevTouchX;
-            int dy = touchY - prevTouchY;
+            float rawDx = (float)(touchX - prevTouchX);
+            float rawDy = (float)(touchY - prevTouchY);
 
-            yaw -= dx * TOUCH_SENSITIVITY;
-            pitch -= dy * TOUCH_SENSITIVITY;
+            // 1. Deadzone: suprime ruido analógico/térmico del digitalizador resistivo (<= 1 px)
+            if (rawDx >= -1.0f && rawDx <= 1.0f) rawDx = 0.0f;
+            if (rawDy >= -1.0f && rawDy <= 1.0f) rawDy = 0.0f;
+
+            // 2. Filtro EMA (Exponential Moving Average) paso-bajo (ALPHA ~0.40)
+            const float ALPHA = 0.40f;
+            smoothedDx = (rawDx * ALPHA) + (smoothedDx * (1.0f - ALPHA));
+            smoothedDy = (rawDy * ALPHA) + (smoothedDy * (1.0f - ALPHA));
+
+            // 3. Rotación de cámara suave y responsiva
+            yaw -= smoothedDx * TOUCH_SENSITIVITY;
+            pitch -= smoothedDy * TOUCH_SENSITIVITY;
 
             if (yaw >= 360.0f) yaw -= 360.0f;
             if (yaw < 0.0f) yaw += 360.0f;
             if (pitch > MAX_PITCH) pitch = MAX_PITCH;
             if (pitch < -MAX_PITCH) pitch = -MAX_PITCH;
+        } else {
+            // Primer frame de toque: inicializar estado sin salto abrupto
+            smoothedDx = 0.0f;
+            smoothedDy = 0.0f;
         }
         prevTouchX = touchX;
         prevTouchY = touchY;
         wasTouching = true;
     } else {
-        wasTouching = false;
+        // Touch Debounce / Hold Guard: tolera hasta 2 frames de pérdida accidental de contacto
+        // por fluctuación de presión de los dedos en la pantalla resistiva
+        if (wasTouching) {
+            touchLostFrames++;
+            if (touchLostFrames > 2) {
+                wasTouching = false;
+                smoothedDx = 0.0f;
+                smoothedDy = 0.0f;
+                touchLostFrames = 0;
+            }
+        }
     }
 }
 

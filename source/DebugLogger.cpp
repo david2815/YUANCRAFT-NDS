@@ -50,20 +50,15 @@ void DebugLogger::log(const char* fmt, ...) {
 
     // 1. Escribir a la SD ÚNICAMENTE si libfat está disponible y confirmado
     if (s_fatAvailable) {
-        if (!s_logFile) {
-            s_logFile = fopen("/mcdsefiles/worlds/debug_load.txt", "a");
-        }
-        if (s_logFile) {
-            fputs(buffer, s_logFile);
-            fputc('\n', s_logFile);
-            fflush(s_logFile);
+        FILE* f = fopen("/mcdsefiles/worlds/debug_load.txt", "a");
+        if (f) {
+            fputs(buffer, f);
+            fputc('\n', f);
+            fclose(f);
         }
     }
 
-    // 2. Imprimir a la consola inferior de libnds por pantalla (consoleDemoInit)
-    iprintf("%s\n", buffer);
-
-    // 3. Almacenar en búfer circular para la pantalla de depuración interna
+    // 2. Almacenar en búfer circular para la pantalla de depuración interna
     snprintf(s_history[s_head], sizeof(s_history[s_head]), "%s", buffer);
     s_head = (s_head + 1) % MAX_HISTORY;
     if (s_count < MAX_HISTORY) s_count++;

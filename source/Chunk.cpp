@@ -8,6 +8,7 @@
 #include "Texture.h"
 #include "PerlinNoise.h"
 #include <nds.h>
+#include "DsiDebug.h"
 #include <stdio.h>
 #include <math.h>
 #include "ChunkManager.h"
@@ -45,23 +46,100 @@ static bool s_rebuildDidOne = false;
 // Si una banda no cabe (6144 words = 24 KB; una banda densa de hojas ronda 5000), se arma de nuevo directo en su búfer final.
 static int s_dlAllocFailFrames = 0;   // tras un fallo de memoria, no se reintenta ninguna banda durante unos cuadros
 static const u32 DL_SCRATCH_WORDS = 6144;
-static u32 s_dlScratch[DL_SCRATCH_WORDS + 1] __attribute__((aligned(4)));
+static u32 s_dlScratch[DL_SCRATCH_WORDS + 1] __attribute__((aligned(32)));
 
 static const u32 REBUILD_BUDGET_TICKS = 33514 * 4; // ~4 ms
 static u32 s_rebuildBudget = REBUILD_BUDGET_TICKS;   // el presupuesto de este cuadro (Governor lo recorta si el cuadro anterior se pasó)
 
-// glCallList de libnds hace DC_FlushRange en CADA llamada; las listas se vuelcan una sola vez al armarse (flushList) y aqui solo se manda el DMA
-static inline void flushList(const u32* list) { DC_FlushRange((const void*)list, (list[0] + 1) * 4); }
-static inline void callListFast(const u32* list) {
+// Static Display List Pool pre-alocado en Main RAM (0x02000000)
+// Elimina completamente malloc/free y la fragmentacion del heap durante el juego
+namespace DlPool {
+    static const int SMALL_BLOCK_WORDS = 256;  // 1024 bytes por bloque
+    static const int NUM_SMALL = 96;           // 96 KB
+    static const int LARGE_BLOCK_WORDS = 1024; // 4096 bytes por bloque
+    static const int NUM_LARGE = 16;           // 64 KB
+
+    static u32 s_smallArena[NUM_SMALL * SMALL_BLOCK_WORDS] __attribute__((aligned(32)));
+    static u32 s_largeArena[NUM_LARGE * LARGE_BLOCK_WORDS] __attribute__((aligned(32)));
+
+    static u16 s_freeSmall[NUM_SMALL];
+    static int s_freeSmallCount = NUM_SMALL;
+
+    static u16 s_freeLarge[NUM_LARGE];
+    static int s_freeLargeCount = NUM_LARGE;
+
+    static bool s_inited = false;
+
+    static void init() {
+        if (s_inited) return;
+        s_freeSmallCount = NUM_SMALL;
+        for (int i = 0; i < NUM_SMALL; i++) s_freeSmall[i] = (u16)i;
+        s_freeLargeCount = NUM_LARGE;
+        for (int i = 0; i < NUM_LARGE; i++) s_freeLarge[i] = (u16)i;
+        s_inited = true;
+    }
+
+    static u32* alloc(u32 words) {
+        if (!s_inited) init();
+        if (words <= (u32)SMALL_BLOCK_WORDS && s_freeSmallCount > 0) {
+            u16 idx = s_freeSmall[--s_freeSmallCount];
+            return &s_smallArena[idx * SMALL_BLOCK_WORDS];
+        }
+        if (words <= (u32)LARGE_BLOCK_WORDS && s_freeLargeCount > 0) {
+            u16 idx = s_freeLarge[--s_freeLargeCount];
+            return &s_largeArena[idx * LARGE_BLOCK_WORDS];
+        }
+        return new (std::nothrow) u32[words];
+    }
+
+    static void free(u32* ptr) {
+        if (!ptr) return;
+        if (ptr >= s_smallArena && ptr < s_smallArena + NUM_SMALL * SMALL_BLOCK_WORDS) {
+            int idx = (ptr - s_smallArena) / SMALL_BLOCK_WORDS;
+            if (s_freeSmallCount < NUM_SMALL) s_freeSmall[s_freeSmallCount++] = (u16)idx;
+            return;
+        }
+        if (ptr >= s_largeArena && ptr < s_largeArena + NUM_LARGE * LARGE_BLOCK_WORDS) {
+            int idx = (ptr - s_largeArena) / LARGE_BLOCK_WORDS;
+            if (s_freeLargeCount < NUM_LARGE) s_freeLarge[s_freeLargeCount++] = (u16)idx;
+            return;
+        }
+        delete[] ptr;
+    }
+}
+
+// glCallList seguro y de alta fidelidad: asegura vaciado de D-Cache y sincronizacion estricta con el hardware DMA FIFO
+static inline void flushList(const u32* list) {
+    if (list) DC_FlushRange((const void*)list, (list[0] + 1) * 4);
+}
+
+ITCM_CODE static void callListFast(const u32* list) {
     if (!list) return;
     const u32 count = *list++;
     if (count == 0) return;
-    while ((DMA_CR(0) | DMA_CR(1) | DMA_CR(2) | DMA_CR(3)) & DMA_BUSY) {}
-    while (GFX_BUSY) {} // Sincronización del bus de geometría para evitar desalineación de matrices
+
+    // 1. Vaciado de Data Cache para que la RAM física tenga los vértices actualizados
+    DC_FlushRange((const void*)list, count * 4);
+
+    // 2. Esperar a que la transferencia previa en el canal DMA 0 haya concluido con guarda
+    int guard = 20000;
+    while ((DMA_CR(0) & DMA_BUSY) && --guard > 0);
+    if (guard == 0) DMA_CR(0) = 0;
+
+    // 3. Comprobar registros de estado GXSTAT antes de enviar (evita saturar la FIFO de comandos)
+    guard = 20000;
+    while ((GFX_STATUS & BIT(26)) && !(GFX_STATUS & BIT(25)) && --guard > 0);
+
+    // 4. Transferencia por ráfagas vía DMA Canal 0 en modo Geometry Command FIFO
+    BG_PALETTE[0] = RGB15(31,31,0); // Yellow: VRAM/GXFIFO Transfer Start
     DMA_SRC(0) = (uint32)list;
-    DMA_DEST(0) = 0x4000400;
+    DMA_DEST(0) = 0x04000400;
     DMA_CR(0) = DMA_FIFO | count;
-    while (DMA_CR(0) & DMA_BUSY) {}
+
+    // 5. Esperar a que concluya la transferencia de esta lista antes de volver a la CPU
+    guard = 20000;
+    while ((DMA_CR(0) & DMA_BUSY) && --guard > 0);
+    if (guard == 0) DMA_CR(0) = 0;
 }
 static int s_lodBuildsThisFrame = 0;
 
@@ -156,7 +234,7 @@ int Chunk::getDisplayListBytes() { return s_dlTotalBytes; }
 
 void Chunk::freeLodList() {
     if (dlLod) s_dlTotalBytes -= (int)((dlLod[0] + 1) * 4);
-    delete[] dlLod;
+    DlPool::free(dlLod);
     dlLod = nullptr;
     dlLodVerts = 0;
     lodDirty = true;
@@ -169,20 +247,22 @@ Chunk::~Chunk() {
     freeLodList();
     for (int b = 0; b < DL_BAND_COUNT; b++) {
         if (dlBands[b]) s_dlTotalBytes -= (int)((dlBands[b][0] + 1) * 4);
-        delete[] dlBands[b];
+        DlPool::free(dlBands[b]);
+        dlBands[b] = nullptr;
         if (dlBands2[b]) s_dlTotalBytes -= (int)((dlBands2[b][0] + 1) * 4);
-        delete[] dlBands2[b];
+        DlPool::free(dlBands2[b]);
+        dlBands2[b] = nullptr;
     }
 }
 
 void Chunk::freeDisplayLists() {
     for (int b = 0; b < DL_BAND_COUNT; b++) {
         if (dlBands[b]) s_dlTotalBytes -= (int)((dlBands[b][0] + 1) * 4);
-        delete[] dlBands[b];
+        DlPool::free(dlBands[b]);
         dlBands[b] = nullptr;
         dlBandVertCount[b] = 0;
         if (dlBands2[b]) s_dlTotalBytes -= (int)((dlBands2[b][0] + 1) * 4);
-        delete[] dlBands2[b];
+        DlPool::free(dlBands2[b]);
         dlBands2[b] = nullptr;
         dlBandVertCount2[b] = 0;
     }
@@ -203,6 +283,10 @@ void Chunk::setBudgetPercent(int percent) {
     s_rebuildBudget = REBUILD_BUDGET_TICKS / 100 * (u32)percent;
 }
 
+bool Chunk::isHighBudget() {
+    return s_heavyBudget > HEAVY_BUDGET_TICKS;
+}
+
 void Chunk::beginHeavyFrame() {
     s_heavyFrameStart = Prof::now();
     s_heavyDidOne = false;
@@ -212,9 +296,9 @@ bool Chunk::heavyBudgetLeft() {
     return !s_heavyDidOne || (Prof::now() - s_heavyFrameStart) < s_heavyBudget * (u32)WorldConfig::budgetMul();   // modo dsi: el doble de tiempo por cuadro
 }
 
-static const u32 POLYFMT_CULLED    = POLY_ALPHA(31) | POLY_CULL_BACK | POLY_FOG;
-static const u32 POLYFMT_BOTHSIDES = POLY_ALPHA(31) | POLY_CULL_NONE  | POLY_FOG;
-static const u32 POLYFMT_WATER     = POLY_ALPHA(22) | POLY_CULL_NONE  | POLY_FOG | POLY_ID(22);   // agua translucida
+static const u32 POLYFMT_CULLED    = POLY_ALPHA(31) | POLY_CULL_NONE | POLY_FOG | POLY_ID(1);
+static const u32 POLYFMT_BOTHSIDES = POLY_ALPHA(31) | POLY_CULL_NONE | POLY_FOG | POLY_ID(1);
+static const u32 POLYFMT_WATER     = POLY_ALPHA(22) | POLY_CULL_NONE | POLY_FOG | POLY_ID(22);   // agua translucida
 
 static bool getPatchAt(float globalXi, float globalZi, BlockType& outType) {
     const float GRID_SIZE = 12.0f;
@@ -290,13 +374,17 @@ static bool getPatchAt(float globalXi, float globalZi, BlockType& outType) {
 void Chunk::continueDisplayListRebuild(const ChunkManager* manager, int* rebuildBandBudget) {
     if (s_dlAllocFailFrames > 0) return;
     int processed = 0;
-    while (displayListRebuildBand < DL_BAND_COUNT && processed < DL_REBUILD_BANDS_PER_CALL &&
-           (!rebuildBandBudget || *rebuildBandBudget > 0)) {
-        // Presupuesto de TIEMPO compartido por todos los chunks del frame
-        if (s_rebuildDidOne && Prof::now() - s_rebuildFrameStart > s_rebuildBudget) break;
-
+    const bool isThrottled = (rebuildBandBudget != nullptr);
+    while (displayListRebuildBand < DL_BAND_COUNT &&
+           (!isThrottled || processed < DL_REBUILD_BANDS_PER_CALL) &&
+           (!isThrottled || *rebuildBandBudget > 0)) {
         int band = displayListRebuildBand;
         const int half = displayListRebuildHalf;   // 0 = mitad x baja, 1 = mitad x alta (en la proxima vuelta del bucle / del cuadro)
+        g_CurrentExecStep = 0x2000 | ((chunkX & 0x3F) << 8) | (band & 0x1F);
+
+        // Presupuesto de TIEMPO compartido por todos los chunks del frame (solo durante gameplay con throttling)
+        if (isThrottled && s_rebuildDidOne && Prof::now() - s_rebuildFrameStart > s_rebuildBudget) break;
+
         u32**  dst      = half ? dlBands2 : dlBands;
         int*   dstVerts = half ? dlBandVertCount2 : dlBandVertCount;
         const int xBegin = half ? SIZE_X / 2 : 0;
@@ -320,7 +408,7 @@ void Chunk::continueDisplayListRebuild(const ChunkManager* manager, int* rebuild
         }
 
         if (dst[band]) s_dlTotalBytes -= (int)((dst[band][0] + 1) * 4);
-        delete[] dst[band];
+        DlPool::free(dst[band]);
         dst[band] = nullptr;
         dstVerts[band] = 0;
 
@@ -330,21 +418,28 @@ void Chunk::continueDisplayListRebuild(const ChunkManager* manager, int* rebuild
         }
 
         // Media banda con contenido: se construye ENTERA en esta llamada (atómica), en una sola pasada sobre el búfer de trabajo
+        BG_PALETTE[0] = RGB15(0,0,31); // Blue: Chunk Mesh Allocation
         DisplayListBuilder scratch(s_dlScratch, DL_SCRATCH_WORDS);
         buildBandGeometry(scratch, band, manager, xBegin, xEnd);
         u32 bodyWords = scratch.finish();
 
         if (bodyWords > 0) {
-            u32* buf = new (std::nothrow) u32[1 + bodyWords];
-            if (!buf) {   // sin memoria: se reintenta la misma banda, pero no en cada cuadro ni desde cada chunk (cada intento arma la banda entera)
-                bandDirty.v[band] = 1;
-                displayListRebuildHalf = 0;
+            u32* buf = DlPool::alloc(1 + bodyWords);
+            if (!buf) {   // sin memoria: avanzar esta media banda para evitar deadlock infinito en pantalla de carga
+                dst[band] = nullptr;
+                dstVerts[band] = 0;
+                if (half == 0) {
+                    displayListRebuildHalf = 1;
+                } else {
+                    displayListRebuildHalf = 0;
+                    displayListRebuildBand++;
+                }
                 s_rebuildDidOne = true;
-                s_dlAllocFailFrames = 30;
-                break;
+                s_dlAllocFailFrames = 5;
+                continue;
             }
             if (!scratch.overflowed()) {
-                dmaCopyWords(3, s_dlScratch, buf, (1 + bodyWords) * sizeof(u32));
+                memcpy(buf, s_dlScratch, (1 + bodyWords) * sizeof(u32));
                 flushList(buf);
                 dstVerts[band] = (int)scratch.getVertexCount();
             } else {
@@ -374,12 +469,10 @@ void Chunk::continueDisplayListRebuild(const ChunkManager* manager, int* rebuild
         bool anyDirty = false;   // ¿algo ensució una banda mientras se recorría? se vuelve a pasar solo por esas
         for (int b = 0; b < DL_BAND_COUNT; b++) if (bandDirty.v[b]) { anyDirty = true; break; }
         displayListDirtyDuringRebuild = false;
-        if (anyDirty) {
-            displayListRebuildBand = 0;
-        } else {
+        displayListEverBuilt = true;
+        displayListRebuildBand = 0;
+        if (!anyDirty) {
             displayListDirty = false;
-            displayListRebuildBand = 0;
-            displayListEverBuilt = true;
         }
     }
 }
@@ -1213,6 +1306,10 @@ void Chunk::update(const ChunkManager* manager, bool pauseSecondaryStructures) {
         int cols = 0;
         u32 lastColCost = 0;
         do {
+            g_CurrentExecStep = 0x1000 | ((chunkX & 0x3F) << 8) | (genXi * SIZE_Z + genZi);
+            if (genXi == 0 && genZi == 0) {
+                DSI_Log("[NOISE] Chunk %d,%d noise calculations start\n", chunkX, chunkZ);
+            }
             const u32 colStart = Prof::now();
             { PROFSTEP("column"); generateColumn(genXi, genZi); }
             s_heavyDidOne = true;
@@ -1225,10 +1322,13 @@ void Chunk::update(const ChunkManager* manager, bool pauseSecondaryStructures) {
             if (genZi >= SIZE_Z) {
                 genZi = 0;
                 genXi++;
+                if (genXi >= SIZE_X) {
+                    DSI_Log("[NOISE] Chunk %d,%d all columns noise calc complete\n", chunkX, chunkZ);
+                }
             }
             cols++;
             lastColCost = Prof::now() - colStart;
-        } while (genXi < SIZE_X && cols < WorldConfig::genColsPerFrame() && heavyBudgetLeft()
+        } while (genXi < SIZE_X && cols < ((s_heavyBudget > HEAVY_BUDGET_TICKS) ? (WorldConfig::genColsPerFrame() * 4) : WorldConfig::genColsPerFrame()) && heavyBudgetLeft()
                  && (Prof::now() - s_heavyFrameStart) + lastColCost < s_heavyBudget * (u32)WorldConfig::budgetMul());   // no empieza otra columna si no le cabe (antes 2 columnas de 10 ms = 20+)
         return;
     }
@@ -1452,6 +1552,7 @@ static u32 packTexCoordCell(TextureCell cell, int corner) {
 // en X y Z (se pone con una traslacion antes de llamarla) y absolutas en Y; cada quad lleva su propia traslacion dentro de la lista.
 bool Chunk::buildLodList(bool coarse) {
     DisplayListBuilder b(s_dlScratch, DL_SCRATCH_WORDS);
+    b.polyFormat(POLYFMT_CULLED);
     const int lodStep = coarse ? 2 : 1;
     const float qh = coarse ? 1.0f : 0.5f;
     for (int gxi = 0; gxi < SIZE_X; gxi += lodStep) {
@@ -1503,9 +1604,9 @@ bool Chunk::buildLodList(bool coarse) {
     const u32 words = b.finish();
     freeLodList();
     if (b.overflowed() || words == 0) { lodDirty = false; lodCoarse = coarse; return words == 0; }   // vacia: no hay nada que dibujar
-    u32* buf = new (std::nothrow) u32[1 + words];
+    u32* buf = DlPool::alloc(1 + words);
     if (!buf) return false;
-    dmaCopyWords(3, s_dlScratch, buf, (1 + words) * sizeof(u32));
+    memcpy(buf, s_dlScratch, (1 + words) * sizeof(u32));
     flushList(buf);
     dlLod = buf;
     dlLodVerts = (int)b.getVertexCount();
@@ -1731,49 +1832,52 @@ static void emitCube(DisplayListBuilder& b, float lx, float ly, float lz,
     const TextureCell cWest  = sideOverride ? sideOverride[2] : ((frontDir == 2) ? frontCell : sideCell);
     const TextureCell cEast  = sideOverride ? sideOverride[3] : ((frontDir == 3) ? frontCell : sideCell);
 
-    b.begin(GL_QUADS);
+    const bool hasSideOrBottom = faces.south || faces.north || faces.west || faces.east || faces.bottom;
+    if (hasSideOrBottom) {
+        b.begin(GL_QUADS);
 
-    if (faces.south) {
-        u8 r, g, bl; applyLight(lightSouth, sideR, sideG, sideB, r, g, bl);
-        b.color3b(r, g, bl);
-        b.texCoordPacked(packTexCoordCell(cSouth, 0)); b.vertex(x0, y0, zS);
-        b.texCoordPacked(packTexCoordCell(cSouth, 1)); b.vertex(x1, y0, zS);
-        b.texCoordPacked(packTexCoordCell(cSouth, 2)); b.vertex(x1, y1, zS);
-        b.texCoordPacked(packTexCoordCell(cSouth, 3)); b.vertex(x0, y1, zS);
+        if (faces.south) {
+            u8 r, g, bl; applyLight(lightSouth, sideR, sideG, sideB, r, g, bl);
+            b.color3b(r, g, bl);
+            b.texCoordPacked(packTexCoordCell(cSouth, 0)); b.vertex(x0, y0, zS);
+            b.texCoordPacked(packTexCoordCell(cSouth, 1)); b.vertex(x1, y0, zS);
+            b.texCoordPacked(packTexCoordCell(cSouth, 2)); b.vertex(x1, y1, zS);
+            b.texCoordPacked(packTexCoordCell(cSouth, 3)); b.vertex(x0, y1, zS);
+        }
+        if (faces.north) {
+            u8 r, g, bl; applyLight(lightNorth, sideR, sideG, sideB, r, g, bl);
+            b.color3b(r, g, bl);
+            b.texCoordPacked(packTexCoordCell(cNorth, 0)); b.vertex(x1, y0, zN);
+            b.texCoordPacked(packTexCoordCell(cNorth, 1)); b.vertex(x0, y0, zN);
+            b.texCoordPacked(packTexCoordCell(cNorth, 2)); b.vertex(x0, y1, zN);
+            b.texCoordPacked(packTexCoordCell(cNorth, 3)); b.vertex(x1, y1, zN);
+        }
+        if (faces.west) {
+            u8 r, g, bl; applyLight(lightWest, sideR, sideG, sideB, r, g, bl);
+            b.color3b(r, g, bl);
+            b.texCoordPacked(packTexCoordCell(cWest, 0)); b.vertex(xW, y0, z0);
+            b.texCoordPacked(packTexCoordCell(cWest, 1)); b.vertex(xW, y0, z1);
+            b.texCoordPacked(packTexCoordCell(cWest, 2)); b.vertex(xW, y1, z1);
+            b.texCoordPacked(packTexCoordCell(cWest, 3)); b.vertex(xW, y1, z0);
+        }
+        if (faces.east) {
+            u8 r, g, bl; applyLight(lightEast, sideR, sideG, sideB, r, g, bl);
+            b.color3b(r, g, bl);
+            b.texCoordPacked(packTexCoordCell(cEast, 0)); b.vertex(xE, y0, z1);
+            b.texCoordPacked(packTexCoordCell(cEast, 1)); b.vertex(xE, y0, z0);
+            b.texCoordPacked(packTexCoordCell(cEast, 2)); b.vertex(xE, y1, z0);
+            b.texCoordPacked(packTexCoordCell(cEast, 3)); b.vertex(xE, y1, z1);
+        }
+        if (faces.bottom) {
+            u8 r, g, bl; applyLight(lightBottom, sideR, sideG, sideB, r, g, bl);
+            b.color3b(r, g, bl);
+            b.texCoordPacked(packTexCoordCell(bottomCell, 0)); b.vertex(x0, y0, z0);
+            b.texCoordPacked(packTexCoordCell(bottomCell, 1)); b.vertex(x1, y0, z0);
+            b.texCoordPacked(packTexCoordCell(bottomCell, 2)); b.vertex(x1, y0, z1);
+            b.texCoordPacked(packTexCoordCell(bottomCell, 3)); b.vertex(x0, y0, z1);
+        }
+        b.end();
     }
-    if (faces.north) {
-        u8 r, g, bl; applyLight(lightNorth, sideR, sideG, sideB, r, g, bl);
-        b.color3b(r, g, bl);
-        b.texCoordPacked(packTexCoordCell(cNorth, 0)); b.vertex(x1, y0, zN);
-        b.texCoordPacked(packTexCoordCell(cNorth, 1)); b.vertex(x0, y0, zN);
-        b.texCoordPacked(packTexCoordCell(cNorth, 2)); b.vertex(x0, y1, zN);
-        b.texCoordPacked(packTexCoordCell(cNorth, 3)); b.vertex(x1, y1, zN);
-    }
-    if (faces.west) {
-        u8 r, g, bl; applyLight(lightWest, sideR, sideG, sideB, r, g, bl);
-        b.color3b(r, g, bl);
-        b.texCoordPacked(packTexCoordCell(cWest, 0)); b.vertex(xW, y0, z0);
-        b.texCoordPacked(packTexCoordCell(cWest, 1)); b.vertex(xW, y0, z1);
-        b.texCoordPacked(packTexCoordCell(cWest, 2)); b.vertex(xW, y1, z1);
-        b.texCoordPacked(packTexCoordCell(cWest, 3)); b.vertex(xW, y1, z0);
-    }
-    if (faces.east) {
-        u8 r, g, bl; applyLight(lightEast, sideR, sideG, sideB, r, g, bl);
-        b.color3b(r, g, bl);
-        b.texCoordPacked(packTexCoordCell(cEast, 0)); b.vertex(xE, y0, z1);
-        b.texCoordPacked(packTexCoordCell(cEast, 1)); b.vertex(xE, y0, z0);
-        b.texCoordPacked(packTexCoordCell(cEast, 2)); b.vertex(xE, y1, z0);
-        b.texCoordPacked(packTexCoordCell(cEast, 3)); b.vertex(xE, y1, z1);
-    }
-    if (faces.bottom) {
-        u8 r, g, bl; applyLight(lightBottom, sideR, sideG, sideB, r, g, bl);
-        b.color3b(r, g, bl);
-        b.texCoordPacked(packTexCoordCell(bottomCell, 0)); b.vertex(x0, y0, z0);
-        b.texCoordPacked(packTexCoordCell(bottomCell, 1)); b.vertex(x1, y0, z0);
-        b.texCoordPacked(packTexCoordCell(bottomCell, 2)); b.vertex(x1, y0, z1);
-        b.texCoordPacked(packTexCoordCell(bottomCell, 3)); b.vertex(x0, y0, z1);
-    }
-    b.end();
 
     if (faces.top) {
         u8 r, g, bl; applyLight(lightTop, tintR, tintG, tintB, r, g, bl);
@@ -1979,6 +2083,9 @@ void Chunk::emitLiquidCell(DisplayListBuilder& b, int xi, int yi, int zi, float 
 
     const float x0 = lx - 0.5f, x1 = lx + 0.5f, z0 = lz - 0.5f, z1 = lz + 0.5f, yb = ly - 0.5f;
 
+    const bool anyLiquidFace = showTop || showBottom || showSide[0] || showSide[1] || showSide[2] || showSide[3];
+    if (!anyLiquidFace) return;
+
     b.polyFormat(isWaterBlock(self) ? POLYFMT_WATER : POLYFMT_BOTHSIDES);
     b.begin(GL_QUADS);
 
@@ -2089,6 +2196,7 @@ void Chunk::emitPortalCell(DisplayListBuilder& b, int xi, int yi, int zi, float 
 // skipMask: bit n = no dibujar la cara n (0 abajo, 1 arriba, 2 norte -Z, 3 sur +Z, 4 oeste -X, 5 este +X). topUV: UV propias de la cara de arriba.
 static void emitPartialBox(DisplayListBuilder& b, float lx, float ly, float lz, const float bd[6],
                            const TextureCell cells[6], const bool flip[6], int skipMask, u8 lightRaw, const signed char* topUV) {
+    if ((skipMask & 63) == 63) return; // Todas las caras omitidas: no emitir nada
     u8 r, g, bl; applyLight(lightRaw, 255, 255, 255, r, g, bl);
     const float x0 = lx - 0.5f + bd[0], x1 = lx - 0.5f + bd[3];
     const float y0 = ly - 0.5f + bd[1], y1 = ly - 0.5f + bd[4];
@@ -2736,7 +2844,7 @@ void Chunk::buildBandGeometry(DisplayListBuilder& b, int bandIndex, const ChunkM
             }
         }
     }
-    b.polyFormat(POLYFMT_BOTHSIDES);
+    b.polyFormat(POLYFMT_CULLED);
 }
 
 static inline int chunkFloorDiv(int a, int b) {
@@ -2748,12 +2856,13 @@ static inline int chunkFloorDiv(int a, int b) {
 void Chunk::draw(float playerX, float playerY, float playerZ,
                   float lookDirX, float lookDirY, float lookDirZ, const ChunkManager* manager,
                   int* vertBudget, int* rebuildBandBudget) {
-    if (inWindow && displayListDirty && generationComplete && !cacheRecalcPending && !initialSkyLightPending &&
-        (!rebuildBandBudget || *rebuildBandBudget > 0)) {
-        { PROF(Prof::DL_REBUILD); PROFSTEP("list"); continueDisplayListRebuild(manager, rebuildBandBudget); }
-    }
+    // El renderizado NUNCA debe reconstruir mallas dentro de draw(): la reconstrucción
+    // está desacoplada y regulada en ChunkManager::update a un máximo de 1 chunk por frame
+    (void)rebuildBandBudget;
 
+    glEnable(GL_TEXTURE_2D);
     glBindTexture(0, Texture::textureID);
+    glColor3b(255, 255, 255);
     const float maxDistSq = WorldConfig::renderDistance() * WorldConfig::renderDistance();
     const float LOD_DIST_RAW = WorldConfig::renderDistance() * 0.5f;
     // El detalle completo (bloques con todas sus caras) llega como mucho a 8,5 en cualquier modo: lo que el modo dsi agrega es solo LOD (1 quad por columna)
@@ -2881,23 +2990,6 @@ void Chunk::draw(float playerX, float playerY, float playerZ,
     float originX = gridToWorldX(0);
     float originZ = gridToWorldZ(0);
 
-    // ----- Descarte por campo de visión, en enteros (1 unidad = 1/16 de bloque) -----
-    // Cono de 58°: diagonal real de la cámara (~49°) + margen para balanceo.
-    const int CONE_COS = 136;  // cos(58°) * 256
-    const int CONE_SIN = 217;  // sin(58°) * 256
-    const int BAND_R = 100;    // radio de una banda 8x2x8 (~5.74 bloques) + margen.
-                               // Si cambiás DL_BAND_HEIGHT, este valor hay que recalcularlo.
-
-    int eyeX = (int)(playerX * 16.0f);
-    int eyeY = (int)(playerY * 16.0f);
-    int eyeZ = (int)(playerZ * 16.0f);
-    int dirX = (int)(lookDirX * 256.0f);
-    int dirY = (int)(lookDirY * 256.0f);
-    int dirZ = (int)(lookDirZ * 256.0f);
-    int centerX = (int)((gridToWorldX(0) + gridToWorldX(SIZE_X - 1)) * 8.0f);
-    int centerZ = (int)((gridToWorldZ(0) + gridToWorldZ(SIZE_Z - 1)) * 8.0f);
-    int baseY16 = (int)(gridToWorldY(0) * 16.0f) + DL_BAND_HEIGHT * 8 - 8; // centro de la banda 0
-
     const u32 cullStart = Prof::now();
     u32 callTicks = 0;
     const int originX32 = floattof32(originX);
@@ -2905,18 +2997,6 @@ void Chunk::draw(float playerX, float playerY, float playerZ,
     const int baseY32 = floattof32(gridToWorldY(0));
     for (int band = 0; band < DL_BAND_COUNT; band++) {
         if (!dlBands[band] && !dlBands2[band]) continue;
-
-        int vx = centerX - eyeX;
-        int vy = baseY16 + band * DL_BAND_HEIGHT * 16 - eyeY;
-        int vz = centerZ - eyeZ;
-        int v2 = vx * vx + vy * vy + vz * vz;
-        if (v2 > BAND_R * BAND_R) { // si la cámara está dentro de la banda, siempre se dibuja
-            int d = (vx * dirX + vy * dirY + vz * dirZ) >> 8; // distancia a lo largo de la mirada
-            int e2 = v2 - d * d;
-            if (e2 < 0) e2 = 0;
-            int e = sqrt32(e2);                               // distancia perpendicular a la mirada
-            if (((e * CONE_COS - d * CONE_SIN) >> 8) > BAND_R) continue; // fuera del cono
-        }
 
         // Comprobación y reseteo de desbordamiento de polígonos por hardware en la GPU
         if (GFX_CONTROL & GL_POLY_OVERFLOW) {
@@ -4264,7 +4344,7 @@ bool Chunk::generateBigOakTree(const ChunkManager* manager, int xi, int zi, int 
     int height = bigTreeCheckClearance(this, manager, baseX, baseY, baseZ, requestedHeight);
     if (height < 0) return false;
 
-    BigTreeBranch branches[48];
+    static BigTreeBranch branches[48];
     int branchCount = 0;
     bigTreeComputeBranches(this, manager, rng, baseX, baseY, baseZ, (float)height, branches, branchCount, 48);
 

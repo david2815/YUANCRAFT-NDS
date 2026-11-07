@@ -125,3 +125,4 @@ with open('source/main.cpp', 'w', encoding='utf-8', newline='\n') as f:
     f.write(norm)
 
 print("SUCCESS: patch_main_safe_seq.py applied successfully!")
+

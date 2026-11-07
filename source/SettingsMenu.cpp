@@ -1,6 +1,7 @@
 #include "Hardware.h"
 #include "SettingsMenu.h"
 #include "Options.h"
+#include "PerformancePreset.h"
 #include "TextKeyboard.h"
 #include "Controls.h"
 #include "Sound.h"
@@ -9,7 +10,7 @@
 #include <string.h>
 
 static int s_selected = 0;          // 0 = back, 1 = controls, 2 = auto jump, 3 = debug large chest, 4 = chunk mode, 5 = default seed (random/custom), 6 = custom default seed, 7 = clockcompassinvupdate, 8 = particles, 9 = sound, 10 = inventoryMap
-static inline int getRowCount() { return g_isDSi ? 15 : 14; }
+static inline int getRowCount() { return 15; }
 // Pop-up de confirmacion para opciones exclusivas de DSi en DS original
 static bool s_showingPopUp = false;
 static int s_pendingOption = -1;
@@ -115,10 +116,7 @@ static void printOption(int row) {
         case 12: printRow(sel, "inventoryMap", Options::get().inventoryMap ? "true" : "false"); break;
         case 13: printRow(sel, "fps counter", Options::get().showFps ? "on" : "off"); break;
         case 14: {
-            if (g_isDSi) {
-                const bool fluid = Options::get().dsiPerformanceProfile == 1;
-                printRow(sel, "dsi perf profile", fluid ? "fluid (60fps)" : "distance (30fps)");
-            }
+            printRow(sel, "perf preset", PresetManager::getCurrentPresetName());
             break;
         }
     }
@@ -277,6 +275,7 @@ bool SettingsMenu::update(u32 keysDown) {
                 Sound::uiClick();
                 if (s_pendingOption == 4) Options::get().chunkMode = (unsigned char)s_pendingValue;
                 else if (s_pendingOption == 5) Options::get().renderQuality = (unsigned char)s_pendingValue;
+                PresetManager::notifyOptionChanged();
                 Options::save();
                 s_showingPopUp = false;
                 consoleDemoInit();
@@ -304,6 +303,7 @@ bool SettingsMenu::update(u32 keysDown) {
             Sound::uiClick();
             if (s_pendingOption == 4) Options::get().chunkMode = (unsigned char)s_pendingValue;
             else if (s_pendingOption == 5) Options::get().renderQuality = (unsigned char)s_pendingValue;
+            PresetManager::notifyOptionChanged();
             Options::save();
             s_showingPopUp = false;
             consoleDemoInit();
@@ -356,6 +356,7 @@ bool SettingsMenu::update(u32 keysDown) {
             openDebug();   // submenu debug options
         } else if (s_selected == 10) {
             Options::get().particles = !Options::get().particles;
+            PresetManager::notifyOptionChanged();
             Options::save();
             draw();
         } else if (s_selected == 5) {
@@ -370,6 +371,7 @@ bool SettingsMenu::update(u32 keysDown) {
                 return false;
             }
             Options::get().renderQuality = (unsigned char)q;
+            PresetManager::notifyOptionChanged();
             Options::save();
             draw();
         } else if (s_selected == 12) {
@@ -404,17 +406,8 @@ bool SettingsMenu::update(u32 keysDown) {
                 consoleDemoInit();   // de vuelta a la lista
                 draw();
             }
-        } else if (s_selected == 14 && g_isDSi) {
-            const int next = Options::get().dsiPerformanceProfile == 1 ? 0 : 1;
-            Options::get().dsiPerformanceProfile = (unsigned char)next;
-            if (next == 1) {
-                // Perfil Fluidez (60 FPS): reduce la distancia de dibujado al minimo indispensable
-                Options::get().chunkMode = 0; // fast (3x3)
-            } else {
-                // Perfil Distancia (30 FPS): expande la distancia de renderizado al punto optimo
-                Options::get().chunkMode = 2; // dsi (7x7)
-            }
-            Options::save();
+        } else if (s_selected == 14) {
+            PresetManager::cyclePreset((keysDown & KEY_LEFT) ? -1 : 1);
             draw();
         } else if (s_selected == 4) {
             // fast (0) -> ds (1) -> dsi (2)
@@ -429,6 +422,7 @@ bool SettingsMenu::update(u32 keysDown) {
                 return false;
             }
             Options::get().chunkMode = (unsigned char)m;
+            PresetManager::notifyOptionChanged();
             Options::save();
             draw();
         }

@@ -4,6 +4,7 @@
 #include "ChunkCompression.h"
 #include "Profiler.h"
 #include "DebugLogger.h"
+#include "DsiDebug.h"
 #include <stdio.h>
 
 IpcChunkExchange IpcChunkLoader::s_exchange __attribute__((aligned(4))) = {};
@@ -67,7 +68,7 @@ void IpcChunkLoader::abortRequest(ChunkManager* manager) {
             manager->clearAwaitingLoad(slot);
         }
     }
-    REG_IPC_FIFO_CR |= IPC_FIFO_SEND_CLEAR;
+    // REG_IPC_FIFO_CR |= IPC_FIFO_SEND_CLEAR;
     s_exchange.status = IPC_STATUS_IDLE;
     s_exchange.slotIndex = -1;
     s_exchange.frameCounter = 0;
@@ -78,6 +79,7 @@ void IpcChunkLoader::update(ChunkManager* manager) {
     if (!manager) return;
     if (s_exchange.status == IPC_STATUS_IDLE) return;
 
+    g_CurrentExecStep = 0x3000 | (s_exchange.slotIndex & 0xFF);
     s_exchange.frameCounter++;
 
     // 1. Mecanismo de Escape a 1 FPS (límite de 60 frames sin respuesta)
@@ -131,11 +133,15 @@ void IpcChunkLoader::update(ChunkManager* manager) {
             return;
         }
 
+        // Invalidar Data Cache del ARM9 para evitar datos sucios/antiguos leídos por SD
+        DC_InvalidateRange(s_exchange.compBuffer, (readBytes + 31) & ~31);
+
         s_exchange.dataSize = (u32)readBytes;
         DebugLogger::log("[DEBUG] Datos de bloques recibidos en RAM. Tamaño: %d bytes.", s_exchange.dataSize);
 
         // El ARM7 notifica mediante interrupción en REG_IPC_FIFO_CR que los bloques están listos
-        REG_IPC_FIFO_CR |= IPC_FIFO_RECV_IRQ;
+        // REG_IPC_FIFO_CR |= IPC_FIFO_RECV_IRQ;
+        BG_PALETTE[0] = RGB15(31,0,31); // Magenta: IPC ARM7 Sync Notification
         s_exchange.status = IPC_STATUS_READY;
     }
 

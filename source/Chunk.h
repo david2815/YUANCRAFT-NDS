@@ -14,7 +14,7 @@ class DisplayListBuilder;
 
 class Chunk {
 public:
-    Chunk(int chunkX, int chunkZ, unsigned int seed);
+    Chunk(int chunkX = 0, int chunkZ = 0, unsigned int seed = 0);
     ~Chunk();
     void draw(float playerX, float playerY, float playerZ,
               float lookDirX, float lookDirY, float lookDirZ, const class ChunkManager* manager = nullptr,
@@ -103,6 +103,8 @@ public:
     void recomputeColumnRange(int xi, int zi, int yiLo, int yiHi, const class ChunkManager* manager); // igual, pero ensucia solo esas alturas
     bool isInitialSkyLightPending() const { return initialSkyLightPending; }
     bool hasBuiltDisplayList() const { return displayListEverBuilt; }
+    bool isDisplayListDirty() const { return displayListDirty; }
+    friend class ChunkManager;
     static int getDisplayListBytes();
 
     int getSkyBottom(int xi, int zi) const { return skyBottom[xi][zi]; }
@@ -110,7 +112,8 @@ public:
     static void beginRebuildFrame();
     void scheduleFullRefresh();
     static void beginHeavyFrame();
-    static void setBudgetPercent(int percent);   // escala los presupuestos de tiempo de este cuadro (Governor): 100 = normales
+    static void setBudgetPercent(int percent);
+    static bool isHighBudget();   // escala los presupuestos de tiempo de este cuadro (Governor): 100 = normales
     static bool heavyBudgetLeft();
     void freeDisplayLists();
     void setInWindow(bool v) {

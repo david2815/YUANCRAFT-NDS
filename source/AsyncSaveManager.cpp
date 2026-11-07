@@ -68,7 +68,8 @@ bool AsyncSaveManager::enqueueSave(const char* path, const u8* compData, int com
 
     // Notificación al coprocesador ARM7 mediante canal FIFO
     // Notifica el tamaño y registro del volcado de fondo
-    fifoSendValue32(FIFO_USER_01, (u32)(0x53410000 | (compSize & 0xFFFF))); // 'SA' = Save Async
+    // Canal seguro FIFO_USER_01: Desacoplado para evitar saturacion del buffer fisico de 16 palabras en ARM7 estandar
+    // fifoSendValue32(FIFO_USER_01, (u32)(0x53410000 | (compSize & 0xFFFF)));
 
     return true;
 }
@@ -122,7 +123,8 @@ void AsyncSaveManager::processQueue() {
     }
 
     // Confirmación de escritura completada al ARM7
-    fifoSendValue32(FIFO_USER_01, 0x53410000 | 0x00FF);
+    // Canal seguro FIFO_USER_01: Desacoplado para evitar saturacion del buffer fisico de 16 palabras en ARM7 estandar
+    // fifoSendValue32(FIFO_USER_01, 0x53410000 | 0x00FF);
 }
 
 void AsyncSaveManager::flushAll() {

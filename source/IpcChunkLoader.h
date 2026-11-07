@@ -20,8 +20,8 @@ enum IpcLoadStatus : u32 {
     IPC_STATUS_TIMEOUT = 5
 };
 
-// Estructura en memoria segura de intercambio (IPC Sync), alineada a 32 bits
-struct __attribute__((aligned(4))) IpcChunkExchange {
+// Estructura en memoria segura de intercambio (IPC Sync), alineada a línea de caché ARM9 (32 bytes)
+struct __attribute__((aligned(32))) IpcChunkExchange {
     volatile u32 status;
     volatile int chunkX;
     volatile int chunkZ;
@@ -30,8 +30,8 @@ struct __attribute__((aligned(4))) IpcChunkExchange {
     volatile u32 dataSize;
     volatile u32 frameCounter;
     char path[128];
-    u8 compBuffer[4096] __attribute__((aligned(4)));  // Búfer LZSS transferido por ARM7
-    u8 rawBuffer[12288] __attribute__((aligned(4)));  // Búfer descomprimido (blocks + liquidMeta)
+    u8 compBuffer[12288] __attribute__((aligned(32)));  // Búfer LZSS transferido por ARM7
+    u8 rawBuffer[12288] __attribute__((aligned(32)));  // Búfer descomprimido (blocks + liquidMeta)
 };
 
 class IpcChunkLoader {
@@ -57,13 +57,9 @@ public:
     // Abortar la solicitud asíncrona de inmediato por timeout o fallo físico
     static void abortRequest(ChunkManager* manager);
 
-    // Envío FIFO e interrupción por hardware sin bucle while ciego
+    // Notificación segura sin corromper los registros de control IPC_FIFO_CR
     static inline void irqSendFIFO(u32 cmd) {
-        if (REG_IPC_FIFO_CR & IPC_FIFO_SEND_FULL) {
-            REG_IPC_FIFO_CR |= IPC_FIFO_SEND_CLEAR;
-        }
-        REG_IPC_FIFO_CR |= IPC_FIFO_SEND_IRQ | IPC_FIFO_ENABLE;
-        fifoSendValue32(FIFO_USER_02, cmd);
+        (void)cmd;
     }
 
 private:

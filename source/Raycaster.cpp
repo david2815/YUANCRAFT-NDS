@@ -65,7 +65,7 @@ static bool cellPresent(const ChunkManager& cm, bool hitLiquidSources, float x, 
     return hitLiquidSources && cm.isLiquidSourceAt(x, y, z);
 }
 
-RaycastHit Raycaster::cast(const ChunkManager& chunkManager,
+ITCM_CODE RaycastHit Raycaster::cast(const ChunkManager& chunkManager,
                             float originX, float originY, float originZ,
                             float dirX, float dirY, float dirZ,
                             float maxDistance, bool hitLiquidSources) {

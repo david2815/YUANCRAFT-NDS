@@ -53,6 +53,9 @@ public:
         g_isDSi = isDSiMode();
 
         if (g_isDSi) {
+            // Habilitar formalmente 16MB Main RAM (bits 14-15) y NDMA Access (bit 16) en DSi
+            REG_SCFG_EXT |= (3 << 14) | (1 << 16);
+
             // Conmutación segura de reloj preservando waitstates de bus y VRAM
             applyClockSafeTWL();
 

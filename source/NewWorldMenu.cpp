@@ -82,7 +82,7 @@ void NewWorldMenu::open() {
 
 NewWorldMenu::Result NewWorldMenu::update(unsigned int keysDown) {
     if (keysDown & KEY_B) { Sound::uiClick(); return RES_CANCEL; }
-    if (keysDown & KEY_START) { Sound::uiClick(); return RES_CREATE; }
+    if (keysDown & (KEY_START | KEY_A)) { Sound::uiClick(); return RES_CREATE; }
     if (!(keysDown & KEY_TOUCH)) return RES_NONE;
 
     touchPosition t;
